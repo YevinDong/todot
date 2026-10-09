@@ -1,0 +1,36 @@
+---
+source: tests/snapshots.rs
+expression: buffer_to_text(&buf)
+---
+ 筛 选                       ▶▮◀ /tmp/tuxedo-snapshot.txt  •  15 项   详 情                              
+                                                                                                    
+ 项 目                       (2)  优 先 级  A  ──────────────────────── 优 先 级     (A)                    
+   +work             4      1 [x] ▸ (A) Finish Q2 board deck +work 创 建 日 期   2026-05-01             
+   +health           3      2 [x]   (A) Call dentist to reschedule 截 止 日 期   2026-05-06  今 天        
+   +finance          2     (3)  优 先 级  B  ──────────────────────── 项 目       +work                  
+   +home            ┌ tuxedo · 命 令  ───────────────────────────────────────────┐ptop                
+   +learning        │ > █                                                      │                    
+   +personal        │──────────────────────────────────────────────────────────│                    
+   +travel          │ ▶ 新 建 任 务                                              n │                    
+                    │   编 辑 当 前 任 务 （ 普 通 模 式 ）                              e │1 Finish Q2 board   
+ 场 景                │   编 辑 当 前 任 务 （ 输 入 模 式 ）                              i │aptop               
+   @errands         │   切 换 完 成 状 态                                          x │6                   
+   @home            │   删 除 任 务                                             dd │                    
+   @laptop          │   切 换 优 先 级                                            p │                    
+   @phone           │   任 务 下 移                                              J │                    
+                    │   任 务 上 移                                              K │                    
+                    │   给 当 前 任 务 添 加 项 目                                    + │                    
+                    │   给 当 前 任 务 添 加 或 移 除 场 景                              c │                    
+                    │   复 制 整 行                                             yy │                    
+                    │   复 制 正 文                                             yb │                    
+                    │   打 开 任 务 笔 记                                          o │                    
+                    │   创 建 或 打 开 任 务 笔 记                                    O │                    
+                    │   撤 销                                                  u │                    
+                    │  ↑↓ / Ctrl-N/P 移 动  · Enter 执 行  · Esc 取 消               │                    
+                    └──────────────────────────────────────────────────────────┘                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+ 命 令    输 入 以 筛 选  · Enter 执 行  · Esc 取 消       15 项 待 办  · 2 项 已 选  · 2026-05-06 · tuxedo 2026.8.1

@@ -1,0 +1,13 @@
+/.local/
+/.config/
+/target/
+/todo.txt
+/done.txt
+/inbox.txt
+/todo.md
+/notes/
+/docs/screenshots/
+*.tuxedo-lock
+.*.tmp.*
+__pycache__/
+*.snap.new

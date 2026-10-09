@@ -1,0 +1,36 @@
+---
+source: tests/snapshots.rs
+expression: buffer_to_text(&buf)
+---
+ 筛 选                       ▶▮◀ /tmp/tuxedo-snapshot.txt  •  15 项   详 情                              
+                                                                                                    
+ 项 目                       (2)  优 先 级  A  ──────────────────────── 优 先 级     (A)                    
+   +work             4      1 ▸ (A) Finish Q2 board deck +work @la 创 建 日 期   2026-05-01             
+   +health           3      2   (A) Call dentist to reschedule cle 截 止 日 期   2026-05-06  今 天        
+   +finance          2     (3)  优 先 级  B  ──────────────────────── 项 目       +work                  
+   +home             1      3   (B) Review pull requests for auth  场 景       @laptop                
+   +learning         1      4   (B) Renew passport before summer t                                  
+   +personal         1      5   (B) Draft hiring rubric for senior 原 始 记 录                          
+   +travel           1     (2)  优 先 级  C  ────────────────────────                                  
+                            6   (C) Pay quarterly estimated taxes  (A) 2026-05-01 Finish Q2 board   
+ 场 景                        7   (C) Order new running shoes +healt deck +work @laptop               
+   @errands          4     (8)┌ 新 建 任 务  ────────────────────────────┐:2026-05-06                   
+   @home             4      8 │                                      │                              
+   @laptop           4      9 │  › Water the plants +home█           │                              
+   @phone            3     10 │  有 效  · 1 +项 目                       │                              
+                           11 │                                      │                              
+                           12 │  格 式 ： (A) 买 牛 奶  +购 物  @家  due:2026-│                              
+                           13 │                                      │                              
+                           14 └──────────────────────────────────────┘                              
+                           15     ┌ ↻ 重 复 任 务  ──────────────────────────────────────────────┐      
+                                  │                                                          │      
+                                  │  每 隔   1    天   工 作 日   周   月   年                        │      
+                                  │                                                          │      
+                                  │  模 式    按 截 止 日 期    完 成 后          下 次 ： 周 三  五 月 13日   │      
+                                  │                                                          │      
+                                  │  → 写 入  rec:+1w                                          │      
+                                  │                                                          │      
+                                  │  jk 字 段  · hl/+- 修 改  · Enter 保 存  · Esc 取 消             │      
+                                  └──────────────────────────────────────────────────────────┘      
+                                                                                                    
+ 输 入    Enter 保 存  · Esc 普 通 模 式                           15 项 待 办  · 2026-05-06 · tuxedo 2026.8.1

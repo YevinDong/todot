@@ -1,0 +1,3 @@
+* text=auto eol=lf
+# 界面快照保留每行末尾的空白单元格。
+tests/snapshots/*.snap -whitespace

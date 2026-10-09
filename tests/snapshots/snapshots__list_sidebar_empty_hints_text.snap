@@ -1,0 +1,36 @@
+---
+source: tests/snapshots.rs
+expression: buffer_to_text(&buf)
+---
+ 筛 选                       ▶▮◀ /tmp/tuxedo-snapshot.txt  •  3 项 任  详 情                              
+                                                                                                    
+ 项 目                       (1)  优 先 级  A  ──────────────────────── 优 先 级     (A)                    
+   添 加 标 签  +project        1 ▸ (A) Buy milk                       创 建 日 期   —                      
+                           (1)  优 先 级  B  ──────────────────────── 项 目                              
+ 场 景                        2   (B) Call mom                       场 景                              
+   添 加 标 签  @context       (1)  无 优 先 级   ────────────────────────                                  
+                            3       Write up notes                 原 始 记 录                          
+                                                                                                    
+                                                                   (A) Buy milk                     
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+ 普 通    j/k 移 动  · n 新 建  · x 完 成  · / 搜 索  · ? 帮 助  · u 撤  3 项 待 办  · 2026-05-06 · tuxedo 2026.8.1

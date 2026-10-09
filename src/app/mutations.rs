@@ -1,0 +1,654 @@
+//! App-level mutation wrappers. Each resolves the cursor to an absolute task
+//! index, delegates to the headless [`Store`](crate::core::Store), then maps the
+//! returned outcome to a flash message and refreshes the visible cache/cursor.
+//! All task logic (recurrence, persistence, reconciliation) lives in the store.
+
+use super::App;
+use super::types::{AddOutcome, Mode, Sort, View};
+use crate::app::WeekStart;
+use crate::core::AddOutcome as CoreAdd;
+use crate::core::{
+    ArchiveDeleteOutcome, ArchiveOutcome, CompleteOutcome, DeleteOutcome, EditOutcome, MoveOutcome,
+    PriorityOutcome, RenameOutcome, TagOutcome, UnarchiveOutcome, UndoOutcome,
+};
+use crate::nl;
+use crate::note;
+use crate::todo::Task;
+
+fn same_sort_key(sort: Sort, a: &Task, b: &Task) -> bool {
+    match sort {
+        Sort::Priority => a.priority == b.priority && a.due == b.due,
+        Sort::Due => a.due == b.due,
+        Sort::File => true,
+    }
+}
+
+impl App {
+    pub fn toggle_complete(&mut self, abs: usize) {
+        match self.store.toggle_complete(abs) {
+            CompleteOutcome::Completed { abs } => {
+                self.flash("已完成");
+                self.after_mutation(abs);
+            }
+            CompleteOutcome::CompletedSpawned { next, .. } => {
+                self.flash("已完成并生成下一项");
+                self.after_mutation(next);
+            }
+            CompleteOutcome::Uncompleted { abs } => {
+                self.flash("已恢复为待办");
+                self.after_mutation(abs);
+            }
+            CompleteOutcome::Aborted(r) => self.handle_reconcile_abort(r),
+            CompleteOutcome::OutOfRange => {}
+            CompleteOutcome::Error(e) => self.flash(format!("完成任务失败：{e}")),
+        }
+    }
+
+    pub fn cycle_priority(&mut self, abs: usize) {
+        match self.store.cycle_priority(abs) {
+            PriorityOutcome::Changed { abs, .. } => self.after_mutation(abs),
+            PriorityOutcome::Aborted(r) => self.handle_reconcile_abort(r),
+            PriorityOutcome::OutOfRange => {}
+            PriorityOutcome::Error(e) => self.flash(format!("设置优先级失败：{e}")),
+        }
+    }
+
+    pub fn move_tasks(&mut self, down: bool) {
+        let moving_selection = self.mode == Mode::Visual && !self.selection.is_empty();
+        if moving_selection {
+            let visible_selected = self
+                .visible_cache
+                .iter()
+                .filter(|&&abs| self.selection.is_selected(abs))
+                .count();
+            if visible_selected != self.selection.len() {
+                self.flash("所选任务包含隐藏项");
+                return;
+            }
+            let spans_sort_groups = {
+                let mut selected = self.selection.iter();
+                selected.next().is_some_and(|first| {
+                    selected.any(|abs| {
+                        !same_sort_key(
+                            self.prefs.sort,
+                            &self.store.tasks()[first],
+                            &self.store.tasks()[abs],
+                        )
+                    })
+                })
+            };
+            if spans_sort_groups {
+                self.flash("所选任务跨越排序分组");
+                return;
+            }
+        }
+        let mut moving: Vec<bool> = self
+            .visible_cache
+            .iter()
+            .enumerate()
+            .map(|(cursor, &abs)| {
+                if moving_selection {
+                    self.selection.is_selected(abs)
+                } else {
+                    cursor == self.cursor
+                }
+            })
+            .collect();
+        let mut swaps = Vec::new();
+        if down {
+            for cursor in (0..moving.len().saturating_sub(1)).rev() {
+                if moving[cursor]
+                    && !moving[cursor + 1]
+                    && same_sort_key(
+                        self.prefs.sort,
+                        &self.store.tasks()[self.visible_cache[cursor]],
+                        &self.store.tasks()[self.visible_cache[cursor + 1]],
+                    )
+                {
+                    swaps.push((self.visible_cache[cursor], self.visible_cache[cursor + 1]));
+                    moving.swap(cursor, cursor + 1);
+                }
+            }
+        } else {
+            for cursor in 1..moving.len() {
+                if moving[cursor]
+                    && !moving[cursor - 1]
+                    && same_sort_key(
+                        self.prefs.sort,
+                        &self.store.tasks()[self.visible_cache[cursor]],
+                        &self.store.tasks()[self.visible_cache[cursor - 1]],
+                    )
+                {
+                    swaps.push((self.visible_cache[cursor], self.visible_cache[cursor - 1]));
+                    moving.swap(cursor, cursor - 1);
+                }
+            }
+        }
+        if swaps.is_empty() {
+            if moving.iter().any(|&selected| selected) {
+                self.flash(match self.prefs.sort {
+                    Sort::Priority => "已到优先级或日期分组边界",
+                    Sort::Due => "已到日期分组边界",
+                    Sort::File => "已到列表边界",
+                });
+            }
+            return;
+        }
+        let Some(mut follow_abs) = self.visible_cache.get(self.cursor).copied() else {
+            return;
+        };
+        for &(abs, target) in &swaps {
+            if follow_abs == abs {
+                follow_abs = target;
+            } else if follow_abs == target {
+                follow_abs = abs;
+            }
+        }
+        match self.store.move_tasks(&swaps) {
+            MoveOutcome::Moved => {
+                self.selection.remap_swaps(&swaps);
+                self.after_mutation(follow_abs);
+            }
+            MoveOutcome::Unchanged | MoveOutcome::OutOfRange => {}
+            MoveOutcome::Aborted(r) => self.handle_reconcile_abort(r),
+            MoveOutcome::Error(e) => self.flash(format!("调整顺序失败：{e}")),
+        }
+    }
+
+    pub fn delete(&mut self, abs: usize) {
+        match self.store.delete(abs) {
+            DeleteOutcome::Deleted { .. } => {
+                self.flash("已删除");
+                self.recompute_visible();
+                self.clamp_cursor();
+            }
+            DeleteOutcome::Aborted(r) => self.handle_reconcile_abort(r),
+            DeleteOutcome::OutOfRange => {}
+            DeleteOutcome::Error(e) => self.flash(format!("写入失败：{e}")),
+        }
+    }
+
+    pub fn add_from_draft(&mut self) -> AddOutcome {
+        let text = self.draft.text().trim().to_string();
+        // A draft still holding nothing but the filter seed carries no task —
+        // treat it as empty so `n` + Enter under a filter stays the silent
+        // no-op it is without one. Inert when nothing is filtered: `tag_seed`
+        // is empty and `text` is already known not to be.
+        if text.is_empty() || text == self.filter.tag_seed().trim_end() {
+            return AddOutcome::Empty;
+        }
+
+        // Natural-language pre-pass. If the buffer reads like prose and the
+        // parser extracted anything structured, rewrite the draft to canonical
+        // todo.txt and bail before saving — the user's *next* Enter saves the
+        // now-canonical form through the store.
+        if nl::looks_like_natural_language(&text)
+            && let Ok(today) = chrono::NaiveDate::parse_from_str(self.store.today(), "%Y-%m-%d")
+            && let Some(parsed) = nl::try_parse(&text, today)
+        {
+            let canonical = nl::format_as_todo_txt(&parsed);
+            if canonical != text {
+                let body_was_filled = !parsed.body.trim().is_empty();
+                self.draft_set(canonical);
+                if body_was_filled {
+                    self.flash("已解析日期，请按 Enter 保存");
+                } else {
+                    self.flash("已解析，请补充正文后按 Enter 保存");
+                }
+                return AddOutcome::Parsed;
+            }
+        }
+
+        match self.store.add_finalized(&text) {
+            CoreAdd::Added { abs } => {
+                self.flash("已添加");
+                self.after_mutation(abs);
+                AddOutcome::Saved
+            }
+            CoreAdd::Empty => AddOutcome::Empty,
+            CoreAdd::Aborted(r) => {
+                self.handle_reconcile_abort(r);
+                AddOutcome::Invalid
+            }
+            CoreAdd::Error(e) => {
+                self.flash(format!("无效输入：{e}"));
+                AddOutcome::Invalid
+            }
+        }
+    }
+
+    pub fn save_edit(&mut self) {
+        let Some(idx) = self.selection.editing() else {
+            return;
+        };
+        let text = self.draft.text().to_string();
+        match self.store.edit_line(idx, &text) {
+            EditOutcome::Saved { abs } => {
+                self.flash("已保存");
+                self.after_mutation(abs);
+            }
+            // Empty draft / vanished index: quiet no-op, as before.
+            EditOutcome::Empty | EditOutcome::OutOfRange | EditOutcome::TermNotFound => {}
+            EditOutcome::Aborted(r) => self.handle_reconcile_abort(r),
+            EditOutcome::Error(e) => self.flash(format!("无效输入：{e}")),
+        }
+    }
+
+    pub fn add_project_to_current(&mut self, name: &str) {
+        let Some(abs) = self.cur_abs() else {
+            return;
+        };
+        match self.store.add_project(abs, name) {
+            TagOutcome::Added { abs, name } => {
+                self.flash(format!("+{name}"));
+                self.after_mutation(abs);
+            }
+            TagOutcome::Removed { .. } | TagOutcome::Unchanged | TagOutcome::OutOfRange => {}
+            TagOutcome::InvalidName => self.flash("项目名称无效"),
+            TagOutcome::Aborted(r) => self.handle_reconcile_abort(r),
+            TagOutcome::Error(e) => self.flash(format!("无效输入：{e}")),
+        }
+    }
+
+    pub fn rename_current_project_as(&mut self, new_name: &str) {
+        let Some(name) = self.filter.project.clone() else {
+            return;
+        };
+        match self.store.rename_project(&name, new_name) {
+            RenameOutcome::Done { renamed } => {
+                self.flash(format!("+{name} → +{new_name}  ({renamed})"));
+                self.filter.project = Some(new_name.to_string());
+                self.recompute_visible();
+                self.clamp_cursor();
+            }
+            RenameOutcome::NothingToRename | RenameOutcome::Unchanged => {}
+            RenameOutcome::InvalidName => self.flash("项目名称无效"),
+            RenameOutcome::Aborted(r) => self.handle_reconcile_abort(r),
+            RenameOutcome::Error(e) => self.flash(format!("重命名失败：{e}")),
+        }
+    }
+
+    pub fn rename_current_context_as(&mut self, new_name: &str) {
+        let Some(name) = self.filter.context.clone() else {
+            return;
+        };
+        match self.store.rename_context(&name, new_name) {
+            RenameOutcome::Done { renamed } => {
+                self.flash(format!("@{name} → @{new_name}  ({renamed})"));
+                self.filter.context = Some(new_name.to_string());
+                self.recompute_visible();
+                self.clamp_cursor();
+            }
+            RenameOutcome::NothingToRename | RenameOutcome::Unchanged => {}
+            RenameOutcome::InvalidName => self.flash("场景名称无效"),
+            RenameOutcome::Aborted(r) => self.handle_reconcile_abort(r),
+            RenameOutcome::Error(e) => self.flash(format!("重命名失败：{e}")),
+        }
+    }
+
+    pub fn toggle_context_on_current(&mut self, name: &str) {
+        let Some(abs) = self.cur_abs() else {
+            return;
+        };
+        match self.store.toggle_context(abs, name) {
+            TagOutcome::Added { abs, name } => {
+                self.flash(format!("@{name}"));
+                self.after_mutation(abs);
+            }
+            TagOutcome::Removed { abs, name } => {
+                self.flash(format!("已移除 @{name}"));
+                self.after_mutation(abs);
+            }
+            TagOutcome::Unchanged | TagOutcome::OutOfRange => {}
+            TagOutcome::InvalidName => self.flash("场景名称无效"),
+            TagOutcome::Aborted(r) => self.handle_reconcile_abort(r),
+            TagOutcome::Error(e) => self.flash(format!("无效输入：{e}")),
+        }
+    }
+
+    pub fn open_note_for_current(&mut self) {
+        self.open_note_for_current_with_create(false);
+    }
+
+    pub fn create_or_open_note_for_current(&mut self) {
+        self.open_note_for_current_with_create(true);
+    }
+
+    fn open_note_for_current_with_create(&mut self, create: bool) {
+        let Some(task) = self.cur_task().cloned() else {
+            return;
+        };
+        let target = note::target_for_task(&task, self.notes_dir());
+
+        if !target.existed_in_task {
+            if !create {
+                self.flash("没有笔记，按 O 创建");
+                return;
+            }
+            if matches!(self.view(), View::Archive) {
+                self.flash("归档任务没有笔记");
+                return;
+            }
+            let Some(abs) = self.cur_task_index_in_tasks() else {
+                return;
+            };
+            match self.store.append_at(abs, &format!("note:{}", target.rel)) {
+                EditOutcome::Saved { abs } => self.after_mutation(abs),
+                EditOutcome::Aborted(r) => {
+                    self.handle_reconcile_abort(r);
+                    return;
+                }
+                EditOutcome::Error(e) => {
+                    self.flash(format!("关联笔记失败：{e}"));
+                    return;
+                }
+                EditOutcome::Empty | EditOutcome::OutOfRange | EditOutcome::TermNotFound => return,
+            }
+        }
+
+        if target.path.exists() {
+            self.queue_editor_path(target.path);
+            return;
+        }
+        if !create {
+            self.flash("笔记不存在，按 O 创建");
+            return;
+        }
+        if let Some(parent) = target.path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            self.flash(format!("创建笔记目录失败：{e}"));
+            return;
+        }
+        if let Err(e) = std::fs::write(&target.path, note::note_template(&task)) {
+            self.flash(format!("创建笔记失败：{e}"));
+            return;
+        }
+        self.queue_editor_path(target.path);
+    }
+
+    pub fn undo(&mut self) {
+        match self.store.undo() {
+            UndoOutcome::Undone => {
+                self.selection.clear();
+                if self.mode == Mode::Visual {
+                    self.mode = Mode::Normal;
+                }
+                self.flash("撤销");
+                self.recompute_visible();
+                self.clamp_cursor();
+            }
+            UndoOutcome::Nothing => {}
+            UndoOutcome::Aborted(r) => self.handle_reconcile_abort(r),
+            UndoOutcome::Error(e) => self.flash(format!("写入失败：{e}")),
+        }
+    }
+
+    pub fn archive_completed(&mut self) {
+        match self.store.archive_completed() {
+            ArchiveOutcome::Archived { count } => {
+                self.flash(format!("已归档 {count} 项"));
+                self.recompute_visible();
+                self.clamp_cursor();
+            }
+            ArchiveOutcome::Nothing => self.flash("没有可归档的任务"),
+            ArchiveOutcome::Aborted(r) => self.handle_reconcile_abort(r),
+            ArchiveOutcome::Error(e) => self.flash(format!("归档失败：{e}")),
+        }
+    }
+
+    /// Move an archived task back into the live list. `archive_idx` indexes
+    /// `archive().tasks()` (the cursor source in Archive view).
+    pub fn unarchive(&mut self, archive_idx: usize) {
+        match self.store.unarchive(archive_idx) {
+            UnarchiveOutcome::Unarchived => {
+                self.flash("已恢复归档任务");
+                self.recompute_visible();
+                self.clamp_cursor();
+            }
+            UnarchiveOutcome::OutOfRange => {}
+            UnarchiveOutcome::Aborted(r) => self.handle_reconcile_abort(r),
+            UnarchiveOutcome::DoneReloaded => {
+                self.flash("done.txt 已被外部修改，已重新加载");
+                self.recompute_visible();
+                self.clamp_cursor();
+            }
+            UnarchiveOutcome::Error(e) => self.flash(format!("恢复归档失败：{e}")),
+        }
+    }
+
+    /// Permanently remove an archived task from `done.txt`.
+    pub fn archive_delete(&mut self, archive_idx: usize) {
+        match self.store.archive_delete(archive_idx) {
+            ArchiveDeleteOutcome::Deleted => {
+                self.flash("已从归档中删除");
+                self.recompute_visible();
+                self.clamp_cursor();
+            }
+            ArchiveDeleteOutcome::OutOfRange => {}
+            ArchiveDeleteOutcome::DoneReloaded => {
+                self.flash("done.txt 已被外部修改，已重新加载");
+                self.recompute_visible();
+                self.clamp_cursor();
+            }
+            ArchiveDeleteOutcome::Error(e) => self.flash(format!("删除失败：{e}")),
+        }
+    }
+
+    pub fn toggle_week_start_date(&mut self) {
+        let week_start = match self.week_start {
+            WeekStart::Sunday => WeekStart::Monday,
+            WeekStart::Monday => WeekStart::Sunday,
+        };
+
+        self.week_start = week_start
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::{
+        WeekStart,
+        test_support::{build_app, build_app_with_config, test_path},
+    };
+    use crate::config::Config;
+
+    #[test]
+    fn open_file_rebinds_path_body_and_resets_cursor() {
+        let mut app = build_app("old one\nold two\nold three\n");
+        app.cursor = 2;
+        let new_path = test_path();
+        let done = new_path.parent().expect("temp parent").join("done.txt");
+
+        app.open_file(new_path.clone(), done, "fresh task\n".into());
+
+        assert_eq!(
+            app.file_path, new_path,
+            "file_path must point at the new file"
+        );
+        assert_eq!(app.tasks().len(), 1, "tasks must reflect the new body");
+        assert_eq!(app.tasks()[0].raw, "fresh task");
+        assert_eq!(
+            app.visible_indices().len(),
+            1,
+            "visible cache must be recomputed"
+        );
+        assert_eq!(app.cursor, 0, "cursor must reset for the new file");
+    }
+
+    #[test]
+    fn add_project_rejects_whitespace_in_name() {
+        let mut app = build_app("a +health\n");
+        app.add_project_to_current("two words");
+        assert_eq!(app.tasks()[0].projects, vec!["health"]);
+        assert_eq!(app.tasks()[0].raw, "a +health");
+        assert_eq!(app.flash_active(), Some("项目名称无效"));
+    }
+
+    #[test]
+    fn add_project_accepts_dashes_underscores_unicode() {
+        let mut app = build_app("a\n");
+        app.add_project_to_current("life-admin_2026");
+        assert_eq!(app.tasks()[0].projects, vec!["life-admin_2026"]);
+        app.add_project_to_current("café");
+        assert_eq!(app.tasks()[0].projects, vec!["life-admin_2026", "café"]);
+    }
+
+    #[test]
+    fn toggle_complete_flashes_completed_then_spawned() {
+        let mut app = build_app("a\n");
+        app.toggle_complete(0);
+        assert!(app.tasks()[0].done);
+        assert_eq!(app.flash_active(), Some("已完成"));
+
+        let mut app = build_app("(A) 2026-04-15 Pay rent due:2026-04-15 rec:+1m\n");
+        app.toggle_complete(0);
+        assert_eq!(app.tasks().len(), 2);
+        assert_eq!(app.flash_active(), Some("已完成并生成下一项"));
+    }
+
+    #[test]
+    fn toggle_context_rejects_whitespace_in_name() {
+        let mut app = build_app("a @home\n");
+        app.toggle_context_on_current("two words");
+        assert_eq!(app.tasks()[0].contexts, vec!["home"]);
+        assert_eq!(app.tasks()[0].raw, "a @home");
+        assert_eq!(app.flash_active(), Some("场景名称无效"));
+    }
+
+    #[test]
+    fn create_or_open_note_appends_link_creates_file_and_queues_editor() {
+        let dir = test_path().with_extension("notes");
+        let cfg = Config {
+            notes_dir: Some(dir.to_string_lossy().into_owned()),
+            ..Config::default()
+        };
+        let mut app = build_app_with_config("Write PR summary +work @desk\n", cfg);
+
+        app.create_or_open_note_for_current();
+
+        let raw = &app.tasks()[0].raw;
+        assert!(
+            raw.contains("note:projects/tuxedo-tasks/write-pr-summary.md"),
+            "task should get stable generated note token: {raw}"
+        );
+        let expected = dir.join("projects/tuxedo-tasks/write-pr-summary.md");
+        assert_eq!(app.take_pending_editor_path(), Some(expected.clone()));
+        let body = std::fs::read_to_string(expected).expect("created note exists");
+        assert!(body.starts_with("# Write PR summary\n"));
+        assert!(body.contains("## My notes\n\n"));
+    }
+
+    #[test]
+    fn open_note_without_existing_token_does_not_create_or_mutate_task() {
+        let dir = test_path().with_extension("notes");
+        let cfg = Config {
+            notes_dir: Some(dir.to_string_lossy().into_owned()),
+            ..Config::default()
+        };
+        let mut app = build_app_with_config("Write PR summary +work @desk\n", cfg);
+
+        app.open_note_for_current();
+
+        assert_eq!(app.tasks()[0].raw, "Write PR summary +work @desk");
+        assert_eq!(app.flash_active(), Some("没有笔记，按 O 创建"));
+        assert!(app.take_pending_editor_path().is_none());
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn open_note_with_existing_file_queues_editor_without_rewriting_task() {
+        let dir = test_path().with_extension("notes");
+        let note = dir.join("projects/example.md");
+        std::fs::create_dir_all(note.parent().expect("note parent")).expect("create note parent");
+        std::fs::write(&note, "# Existing\n").expect("write existing note");
+        let cfg = Config {
+            notes_dir: Some(dir.to_string_lossy().into_owned()),
+            ..Config::default()
+        };
+        let raw = "Write PR summary +work note:projects/example.md\n";
+        let mut app = build_app_with_config(raw, cfg);
+
+        app.open_note_for_current();
+
+        assert_eq!(app.tasks()[0].raw, raw.trim());
+        assert_eq!(app.take_pending_editor_path(), Some(note));
+    }
+
+    #[test]
+    fn add_from_draft_rewrites_nl_prose_into_canonical_draft() {
+        let mut app = build_app("");
+        app.draft_set(
+            "Pay rent monthly on the first of the month, show the todo 3 days before the due date. \
+             It's part of project home and context bank"
+                .into(),
+        );
+        let outcome = app.add_from_draft();
+        assert_eq!(outcome, crate::app::AddOutcome::Parsed);
+        assert_eq!(app.tasks().len(), 0);
+        assert_eq!(
+            app.draft.text(),
+            "Pay rent +home @bank due:2026-06-01 rec:+1m t:-3d"
+        );
+        assert_eq!(
+            app.flash_active(),
+            Some("已解析日期，请按 Enter 保存")
+        );
+    }
+
+    #[test]
+    fn add_from_draft_second_call_saves_canonical_form() {
+        let mut app = build_app("");
+        app.draft_set("Buy milk tomorrow".into());
+        assert_eq!(app.add_from_draft(), crate::app::AddOutcome::Parsed);
+        assert_eq!(app.tasks().len(), 0);
+        let outcome = app.add_from_draft();
+        assert_eq!(outcome, crate::app::AddOutcome::Saved);
+        assert_eq!(app.tasks().len(), 1);
+        assert!(app.tasks()[0].raw.contains("Buy milk"));
+        assert_eq!(app.tasks()[0].due.as_deref(), Some("2026-05-07"));
+    }
+
+    #[test]
+    fn add_from_draft_plain_words_save_on_first_enter() {
+        let mut app = build_app("");
+        app.draft_set("Buy milk".into());
+        let outcome = app.add_from_draft();
+        assert_eq!(outcome, crate::app::AddOutcome::Saved);
+        assert_eq!(app.tasks().len(), 1);
+        assert!(app.tasks()[0].raw.ends_with("Buy milk"));
+        assert_eq!(app.flash_active(), Some("已添加"));
+    }
+
+    #[test]
+    fn add_from_draft_ignores_untouched_filter_seed() {
+        let mut app = build_app("a +work\n");
+        app.set_project_filter(Some("work".to_string()));
+        app.draft_set(app.filter().tag_seed());
+        let outcome = app.add_from_draft();
+        assert_eq!(outcome, crate::app::AddOutcome::Empty);
+        assert_eq!(app.tasks().len(), 1, "no bodyless +work task may be saved");
+        assert_eq!(app.flash_active(), None, "the no-op must stay silent");
+    }
+
+    #[test]
+    fn add_from_draft_saves_a_body_typed_after_the_seed() {
+        let mut app = build_app("a +work\n");
+        app.set_project_filter(Some("work".to_string()));
+        app.draft_set(format!("{}Buy milk", app.filter().tag_seed()));
+        let outcome = app.add_from_draft();
+        assert_eq!(outcome, crate::app::AddOutcome::Saved);
+        assert_eq!(app.tasks().len(), 2);
+        assert_eq!(app.tasks()[1].projects, vec!["work"]);
+        assert!(app.tasks()[1].raw.ends_with("+work Buy milk"));
+    }
+
+    #[test]
+    fn test_toggling_week_start() {
+        let mut app = build_app("");
+        app.toggle_week_start_date();
+        assert_eq!(app.week_start, WeekStart::Monday);
+        app.toggle_week_start_date();
+        assert_eq!(app.week_start, WeekStart::Sunday);
+    }
+}

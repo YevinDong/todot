@@ -1,0 +1,29 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .local/cargo/bin
+            .local/cargo/registry
+            .local/cargo/git
+            .local/rustup
+            .local/target
+          key: ${{ runner.os }}-rust-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+      - name: Build and test current source
+        run: |
+          bash -n install.sh start.sh
+          ./install.sh --test
+          python3 tests/check.py
