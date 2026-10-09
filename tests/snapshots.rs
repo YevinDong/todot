@@ -232,6 +232,193 @@ fn snapshot_app(name: &str, app: &App) {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn mobile_layout_snapshots() {
+    let app = make_app();
+    for (name, cols, rows) in [
+        ("list_mobile_portrait", 40, 60),
+        ("list_narrow", 60, 30),
+        ("list_mobile_keyboard", 40, 16),
+    ] {
+        insta::assert_snapshot!(name, render_text(&app, cols, rows));
+    }
+}
+
+#[test]
+fn mobile_panels_stack_and_keep_list_visible_after_resize() {
+    let mut app = App::new(
+        PathBuf::from(FIXTURE_PATH),
+        many_tasks_body(50),
+        "2026-05-06".into(),
+        Config::default(),
+    );
+    app.prefs.density = Density::Compact;
+    while app.prefs.sort != tuxedo::app::Sort::File {
+        app.cycle_sort();
+    }
+    app.cursor = 40;
+    for (cols, rows) in [(40, 60), (60, 30), (100, 32), (40, 16), (40, 8), (40, 60)] {
+        let text = render_text(&app, cols, rows);
+        let lines = text.lines().collect::<Vec<_>>();
+        assert!(
+            text.contains("row-040"),
+            "cursor vanished at {cols}x{rows}:\n{text}"
+        );
+        if cols < 100 && rows >= 16 {
+            let filters = lines
+                .iter()
+                .position(|line| line.replace(' ', "").starts_with("项目"))
+                .unwrap();
+            let detail = lines
+                .iter()
+                .position(|line| line.replace(' ', "").starts_with("详情"))
+                .unwrap();
+            assert!(filters > 2 && detail > filters);
+            assert!(detail - filters <= 3);
+        }
+        assert!(app.prefs.layout.left && app.prefs.layout.right);
+    }
+    app.prefs.layout.left = false;
+    app.prefs.layout.right = false;
+    let text = render_text(&app, 40, 30);
+    assert!(
+        !text
+            .lines()
+            .any(|line| line.replace(' ', "").starts_with("详情"))
+    );
+    assert!(!text.replace(' ', "").contains("项目"));
+    assert!(text.contains("row-040"));
+}
+
+#[test]
+fn mobile_filter_picker_keeps_active_chip_visible() {
+    let raw = (0..15)
+        .map(|i| format!("task +project-{i:02} @context-{i:02}\n"))
+        .collect::<String>();
+    let mut app = App::new(
+        PathBuf::from(FIXTURE_PATH),
+        raw,
+        "2026-05-06".into(),
+        Config::default(),
+    );
+    app.set_project_filter(Some("project-14".into()));
+    app.mode = Mode::PickProject;
+    let text = render_text(&app, 40, 30);
+    let line = text
+        .lines()
+        .find(|line| line.replace(' ', "").starts_with("项目"))
+        .unwrap();
+    assert!(line.contains("▸+project-14"), "{line}");
+    assert!(line.contains('…'));
+    app.set_context_filter(Some("context-14".into()));
+    app.mode = Mode::PickContext;
+    let text = render_text(&app, 40, 10); // Only one filter row fits.
+    let line = text
+        .lines()
+        .find(|line| line.replace(' ', "").starts_with("场景"))
+        .unwrap();
+    assert!(line.contains("▸@context-14"), "{line}");
+
+    app.saved_filters = vec![
+        tuxedo::app::SavedFilter {
+            name: "first".into(),
+            query: "task".into(),
+        },
+        tuxedo::app::SavedFilter {
+            name: "second".into(),
+            query: "task".into(),
+        },
+    ];
+    app.enter_pick_saved();
+    app.pick_step(true);
+    let text = render_text(&app, 40, 10);
+    let line = text
+        .lines()
+        .find(|line| line.replace(' ', "").starts_with("已存"))
+        .unwrap();
+    assert!(line.contains("▸second"), "{line}");
+    assert!(!line.contains("▸first"));
+}
+
+#[test]
+fn mobile_empty_filters_do_not_reserve_rows_and_status_stays_short() {
+    let mut app = App::new(
+        PathBuf::from(FIXTURE_PATH),
+        "task without tags\n".into(),
+        "2026-05-06".into(),
+        Config::default(),
+    );
+    let text = render_text(&app, 40, 30);
+    let detail = text
+        .lines()
+        .position(|line| line.replace(' ', "").starts_with("详情"))
+        .unwrap();
+    assert_eq!(detail, 20); // 29 body rows - 9 preview rows, no filter rows.
+    let status = text.lines().last().unwrap().replace(' ', "");
+    assert!(
+        status.contains("1项") && status.contains("Enter详情"),
+        "{status}"
+    );
+    assert!(!status.contains("tuxedo") && !status.contains("2026"));
+    app.flash("short flash");
+    assert_eq!(
+        render_text(&app, 40, 30)
+            .lines()
+            .last()
+            .unwrap()
+            .matches("short flash")
+            .count(),
+        1
+    );
+    for (cols, rows) in [(0, 0), (1, 1), (20, 5), (40, 8)] {
+        render_text(&app, cols, rows); // Tiny viewports must not panic.
+    }
+    app.prefs.layout.status_bar = false;
+    assert!(!render_text(&app, 40, 30).replace(' ', "").contains("普通"));
+    app.mode = Mode::Settings;
+    assert!(
+        render_text(&app, 40, 30)
+            .lines()
+            .next()
+            .unwrap()
+            .replace(' ', "")
+            .contains("设置")
+    );
+}
+
+#[test]
+fn full_detail_scroll_clamps_and_reaches_raw_record_after_resize() {
+    let notes = (0..60)
+        .map(|i| format!(" note:\"note-{i:02} 中文备注 long content\""))
+        .collect::<String>();
+    let mut app = App::new(
+        PathBuf::from(FIXTURE_PATH),
+        format!("(A) Full task +work @home{notes}\n"),
+        "2026-05-06".into(),
+        Config::default(),
+    );
+    app.mode = Mode::Detail;
+    let initial = render_text(&app, 40, 16);
+    assert!(initial.contains("note-00"));
+    app.detail_scroll.set(10);
+    let scrolled = render_text(&app, 40, 16);
+    assert_ne!(initial, scrolled);
+    app.detail_scroll.set(u16::MAX);
+    let last = render_text(&app, 40, 16);
+    assert!(last.contains("note-59"));
+    let offset = app.detail_scroll.get();
+    assert!(offset > 10 && offset < u16::MAX);
+    assert_eq!(app.detail_page_height.get(), 15);
+    let wider = render_text(&app, 100, 32);
+    assert_eq!(app.detail_page_height.get(), 31);
+    assert!(wider.contains("note-59"));
+    assert!(app.detail_scroll.get() < offset);
+    app.detail_scroll.set(0);
+    assert_eq!(initial, render_text(&app, 40, 16));
+    app.prefs.layout.right = false;
+    assert!(render_text(&app, 40, 16).contains("note-00"));
+}
+
+#[test]
 fn list_default() {
     snapshot_app("list_default", &make_app());
 }

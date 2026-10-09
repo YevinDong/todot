@@ -110,6 +110,22 @@ with tempfile.TemporaryDirectory(prefix='中文检查 ', dir=ROOT / '.local') as
         fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack('HHHH', 36, 140, 0, 0))
         os.kill(process.pid, signal.SIGWINCH)
         assert '优先级' in screen(), '窗口缩放后应重绘'
+        # 手机窄屏：上下布局、完整详情、缩小高度后仍可返回列表。
+        fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack('HHHH', 30, 40, 0, 0))
+        os.kill(process.pid, signal.SIGWINCH)
+        mobile = screen()
+        assert 'Enter' in mobile and '展开' in mobile, mobile
+        expanded = screen(b'\r')
+        assert '创建日期' in expanded and '检查中文保存' in expanded, expanded
+        screen(b'j\x1b[6~')
+        fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack('HHHH', 16, 40, 0, 0))
+        os.kill(process.pid, signal.SIGWINCH)
+        assert '详情' in screen(), '键盘弹出后详情应重新布局'
+        restored = screen(b'\x1b', raw=True)
+        assert '展开' in plain(restored), 'Esc 应恢复列表与预览'
+        fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack('HHHH', 36, 140, 0, 0))
+        os.kill(process.pid, signal.SIGWINCH)
+        assert '优先级' in screen(), '宽屏应恢复三栏'
         help_text = screen(b'?')
         assert '导航' in help_text and '记录格式' in help_text, help_text
         screen(b'\x1b')
@@ -145,4 +161,4 @@ with tempfile.TemporaryDirectory(prefix='中文检查 ', dir=ROOT / '.local') as
     assert '检查中文保存' not in (project / 'todo.txt').read_text()
     assert '交互录入中文' in (project / 'todo.txt').read_text()
 
-print('通过：路径隔离、中文交互/归档、焦点恢复/缩放/编辑器返回重绘、Ctrl+L 保留输入。')
+print('通过：路径隔离、中文交互/归档、窄屏布局/详情展开、焦点恢复/缩放/编辑器返回重绘、Ctrl+L 保留输入。')

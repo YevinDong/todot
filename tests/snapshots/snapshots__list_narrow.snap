@@ -1,0 +1,34 @@
+---
+source: tests/snapshots.rs
+expression: "render_text(&app, cols, rows)"
+---
+ tuxedo-snap… · 15项  · 优 先 级                                
+                                                            
+ (2)  优 先 级  A  ────────────────────────────────────────────
+  1 ▸ (A) Finish Q2 board deck +work @laptop due:2026-05-06 
+  2   (A) Call dentist to reschedule cleaning @phone +health
+ (3)  优 先 级  B  ────────────────────────────────────────────
+  3   (B) Review pull requests for auth refactor +work @lapt
+  4   (B) Renew passport before summer trip +travel @errands
+  5   (B) Draft hiring rubric for senior eng +work @laptop  
+ (2)  优 先 级  C  ────────────────────────────────────────────
+  6   (C) Pay quarterly estimated taxes @home +finance due:2
+  7   (C) Order new running shoes +health @errands          
+ (8)  无 优 先 级   ────────────────────────────────────────────
+  8       Migrate analytics to new pipeline +work @laptop du
+  9       Pay rent due:2026-05-15 rec:+1m +finance @home    
+ 10       Pick up dry cleaning @errands                     
+ 11       Schedule annual physical @phone +health           
+ 12       Read "Designing Data-Intensive Applications" ch. 4
+ 项 目  +work(4) +health(3) +finance(2) +home(1) …            
+ 场 景  @errands(4) @home(4) @laptop(4) @phone(3)             
+ 详 情  · Enter 展 开                                           
+ Finish Q2 board deck                                       
+                                                            
+ (A) 截 止  2026-05-06 今 天                                    
+ +work @laptop                                              
+                                                            
+                                                            
+                                                            
+                                                            
+ 普 通  · 15项  · Enter详 情  /搜 索

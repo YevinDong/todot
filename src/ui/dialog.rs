@@ -1293,6 +1293,9 @@ mod tests {
             "2026-05-06".to_string(),
             Config::default(),
         );
+        // Isolate popup assertions: compact-layout panels also occupy bottom rows.
+        app.prefs.layout.left = false;
+        app.prefs.layout.right = false;
         app.mode = Mode::Insert;
         app.draft_set_insert(draft.to_string());
         app
@@ -1589,6 +1592,9 @@ mod tests {
             "2026-05-06".to_string(),
             Config::default(),
         );
+        // Isolate popup assertions from the compact-layout panels below the dialog.
+        app.prefs.layout.left = false;
+        app.prefs.layout.right = false;
         app.mode = mode;
         app.draft_set(draft.to_string());
         app

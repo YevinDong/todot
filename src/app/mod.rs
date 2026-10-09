@@ -138,8 +138,11 @@ pub struct App {
     /// previews. Tracked explicitly rather than re-derived from
     /// `filter.search` so duplicate queries don't strand j/k. Only
     /// meaningful while `Mode::PickSavedFilter`; re-seeded on each open.
-    saved_pick_idx: usize,
+    pub(crate) saved_pick_idx: usize,
     pub command_palette: CommandPaletteState,
+    pub detail_scroll: Cell<u16>,
+    pub detail_page_height: Cell<u16>,
+    pub detail_return_mode: Mode,
     /// Vertical scroll offset (rows from the top of the line list) for each
     /// view, keyed by `View::idx()`. Updated at render time via `Cell` so the
     /// renderer can keep the cursor row visible without taking `&mut self`.
@@ -214,6 +217,9 @@ impl App {
             saved_pick_restore: None,
             saved_pick_idx: 0,
             command_palette: CommandPaletteState::default(),
+            detail_scroll: Cell::new(0),
+            detail_page_height: Cell::new(0),
+            detail_return_mode: Mode::Normal,
             view_scroll: [Cell::new(0), Cell::new(0)],
             share: None,
             notes_dir: note_dir,
@@ -625,10 +631,7 @@ impl App {
                 self.flash(format!("从收件箱合并 {} 项", report.merged));
             }
         } else if report.skipped > 0 {
-            self.flash(format!(
-                "收件箱中有 {} 项无法解析，未合并",
-                report.skipped
-            ));
+            self.flash(format!("收件箱中有 {} 项无法解析，未合并", report.skipped));
         }
     }
 

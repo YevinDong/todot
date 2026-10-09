@@ -26,6 +26,7 @@ pub enum Mode {
     Search,
     Visual,
     Help,
+    Detail,
     Settings,
     PromptProject,       // text input → add project on current task
     PromptContext,       // text input → add/remove context on current task

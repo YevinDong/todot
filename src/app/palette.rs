@@ -257,6 +257,11 @@ pub const ENTRIES: &[PaletteEntry] = &[
         keys: "W",
         action: Action::ChangeWeekStart,
     },
+    PaletteEntry {
+        label: "展开任务详情",
+        keys: "Enter",
+        action: Action::OpenDetail,
+    },
 ];
 
 #[derive(Debug, Default, Clone)]
@@ -453,8 +458,10 @@ mod tests {
     fn word_boundary_ranks_above_mid_word() {
         let boundary = "toggle archive view";
         let middle = "fuzzy search";
-        assert!(rank_hit(boundary, &subseq_match_ci(boundary, "arch").unwrap())
-            < rank_hit(middle, &subseq_match_ci(middle, "arch").unwrap()));
+        assert!(
+            rank_hit(boundary, &subseq_match_ci(boundary, "arch").unwrap())
+                < rank_hit(middle, &subseq_match_ci(middle, "arch").unwrap())
+        );
     }
 
     #[test]
@@ -464,7 +471,10 @@ mod tests {
 
     #[test]
     fn case_insensitive_match() {
-        assert_eq!(subseq_match_ci("Archive", "ARCH"), subseq_match_ci("Archive", "arch"));
+        assert_eq!(
+            subseq_match_ci("Archive", "ARCH"),
+            subseq_match_ci("Archive", "arch")
+        );
     }
 
     #[test]
@@ -491,6 +501,7 @@ mod tests {
             Action::MoveTaskUp,
             Action::BeginSearch,
             Action::OpenHelp,
+            Action::OpenDetail,
             Action::OpenSettings,
             Action::OpenCommandPalette,
             Action::Undo,

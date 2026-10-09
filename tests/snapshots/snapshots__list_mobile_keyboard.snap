@@ -1,0 +1,20 @@
+---
+source: tests/snapshots.rs
+expression: "render_text(&app, cols, rows)"
+---
+ tuxedo-snap… · 15项  · 优 先 级            
+                                        
+ (2)  优 先 级  A  ────────────────────────
+  1 ▸ (A) Finish Q2 board deck +work @la
+  2   (A) Call dentist to reschedule cle
+ (3)  优 先 级  B  ────────────────────────
+  3   (B) Review pull requests for auth 
+  4   (B) Renew passport before summer t
+ 项 目  +work(4) +health(3) +finance(2) … 
+ 场 景  @errands(4) @home(4) @laptop(4) … 
+ 详 情  · Enter 展 开                       
+ Finish Q2 board deck                   
+                                        
+ (A) 截 止  2026-05-06 今 天                
+ +work @laptop                          
+ 普 通  · 15项  · Enter详 情  /搜 索

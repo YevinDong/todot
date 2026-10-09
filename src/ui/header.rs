@@ -36,6 +36,28 @@ pub struct HeaderProps<'a> {
 }
 
 pub fn render(frame: &mut Frame, area: Rect, theme: &Theme, props: HeaderProps<'_>) {
+    if super::is_compact(frame.area()) {
+        let title = props.title.unwrap_or("");
+        let name = std::path::Path::new(title)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(title);
+        let mut label = format!(
+            " {} · {}项 · {}",
+            super::ellipsize(name, 12),
+            props.count,
+            props.sort
+        );
+        if let Some(filter) = props.filter {
+            label.push_str(&format!(" · {filter}"));
+        }
+        frame.render_widget(
+            Paragraph::new(super::ellipsize(&label, usize::from(area.width)))
+                .style(Style::default().fg(theme.fg).bg(theme.panel)),
+            area,
+        );
+        return;
+    }
     // Mini cell-bowtie at one-row scale: two triangles flanking a block
     // cursor knot. Same body+knot+body structure and palette as the larger
     // mark used in the empty state and help overlay.

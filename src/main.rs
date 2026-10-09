@@ -38,7 +38,10 @@ fn main() -> Result<()> {
             return Ok(());
         }
         Some("--version") | Some("-V") => {
-            println!("tuxedo {}（todo-tui 中文定制版）", env!("CARGO_PKG_VERSION"));
+            println!(
+                "tuxedo {}（todo-tui 中文定制版）",
+                env!("CARGO_PKG_VERSION")
+            );
             return Ok(());
         }
         Some("update") => {
@@ -101,9 +104,7 @@ fn main() -> Result<()> {
     match theme_warnings.len() {
         0 => {}
         1 => app_state.flash(theme_warnings.into_iter().next().expect("len==1")),
-        n => app_state.flash(format!(
-            "已跳过 {n} 个主题，请检查主题配置目录"
-        )),
+        n => app_state.flash(format!("已跳过 {n} 个主题，请检查主题配置目录")),
     }
     if std::env::var_os("TUXEDO_NO_UPDATE_CHECK").is_none() {
         app_state.set_update_check(update::spawn_check());
@@ -354,6 +355,7 @@ fn handle_key(app: &mut App, key: KeyEvent, keybinds: &KeyBindings) {
         Mode::Insert => handle_insert(app, key, keybinds),
         Mode::Search => handle_search(app, key),
         Mode::Help => handle_help(app, key),
+        Mode::Detail => handle_detail(app, key),
         Mode::Settings => handle_settings(app, key),
         Mode::PromptProject
         | Mode::PromptContext
@@ -366,6 +368,26 @@ fn handle_key(app: &mut App, key: KeyEvent, keybinds: &KeyBindings) {
         Mode::Share => handle_share(app, key),
         Mode::Welcome => handle_welcome(app, key),
         Mode::Normal | Mode::Visual => handle_normal(app, key, keybinds),
+    }
+}
+
+fn handle_detail(app: &mut App, key: KeyEvent) {
+    let scroll = app.detail_scroll.get();
+    let page = app.detail_page_height.get().max(1);
+    let half_page = (page / 2).max(1);
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => app.mode = app.detail_return_mode,
+        KeyCode::Char('c') if ctrl => app.should_quit = true,
+        KeyCode::Char('j') | KeyCode::Down => app.detail_scroll.set(scroll.saturating_add(1)),
+        KeyCode::Char('k') | KeyCode::Up => app.detail_scroll.set(scroll.saturating_sub(1)),
+        KeyCode::PageDown => app.detail_scroll.set(scroll.saturating_add(page)),
+        KeyCode::PageUp => app.detail_scroll.set(scroll.saturating_sub(page)),
+        KeyCode::Char('d') if ctrl => app.detail_scroll.set(scroll.saturating_add(half_page)),
+        KeyCode::Char('u') if ctrl => app.detail_scroll.set(scroll.saturating_sub(half_page)),
+        KeyCode::Home => app.detail_scroll.set(0),
+        KeyCode::End | KeyCode::Char('G') => app.detail_scroll.set(u16::MAX),
+        _ => {}
     }
 }
 
@@ -1073,6 +1095,7 @@ fn resolve_normal_key(app: &mut App, key: KeyEvent, keybinds: &KeyBindings) -> O
         }
         KeyCode::Char('/') => Action::BeginSearch,
         KeyCode::Char('?') => Action::OpenHelp,
+        KeyCode::Enter => Action::OpenDetail,
         KeyCode::Char(',') => Action::OpenSettings,
         KeyCode::Char(':') => Action::OpenCommandPalette,
         KeyCode::Char('u') => Action::Undo,
@@ -1230,6 +1253,11 @@ fn apply_action(app: &mut App, action: Action) {
             app.clear_search();
         }
         Action::OpenHelp => app.mode = Mode::Help,
+        Action::OpenDetail => {
+            app.detail_return_mode = app.mode;
+            app.detail_scroll.set(0);
+            app.mode = Mode::Detail;
+        }
         Action::OpenSettings => app.mode = Mode::Settings,
         Action::OpenCommandPalette => {
             // Snapshot the current mode (Normal or Visual) so cancel/run
@@ -1602,6 +1630,62 @@ mod tests {
             "2026-05-07".into(),
             Config::default(),
         )
+    }
+
+    #[test]
+    fn detail_keys_scroll_without_moving_task_and_restore_visual_mode() {
+        let mut app = build_app();
+        app.mode = Mode::Visual;
+        app.selection.toggle(0);
+        let binds = KeyBindings::default();
+        assert_eq!(
+            resolve(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            Some(Action::OpenDetail)
+        );
+        apply_action(&mut app, Action::OpenDetail);
+        assert_eq!(app.mode, Mode::Detail);
+        app.detail_page_height.set(20);
+        handle_key(&mut app, key('j'), &binds);
+        assert_eq!(app.detail_scroll.get(), 1);
+        assert_eq!(app.cursor, 0);
+        handle_key(&mut app, ctrl('d'), &binds);
+        assert_eq!(app.detail_scroll.get(), 11);
+        handle_key(&mut app, key('k'), &binds);
+        assert_eq!(app.detail_scroll.get(), 10);
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+            &binds,
+        );
+        assert_eq!(app.detail_scroll.get(), 30);
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Home, KeyModifiers::NONE),
+            &binds,
+        );
+        assert_eq!(app.detail_scroll.get(), 0);
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::End, KeyModifiers::NONE),
+            &binds,
+        );
+        assert_eq!(app.detail_scroll.get(), u16::MAX);
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            &binds,
+        );
+        assert_eq!(app.mode, Mode::Visual);
+        assert!(app.selection.is_selected(0));
+        apply_action(&mut app, Action::OpenDetail);
+        assert_eq!(app.detail_scroll.get(), 0);
+        handle_key(&mut app, key('q'), &binds);
+        assert!(!app.should_quit);
+        assert_eq!(app.mode, Mode::Visual);
+        assert_eq!(
+            Action::from_keybind_name("open_detail"),
+            Some(Action::OpenDetail)
+        );
     }
 
     fn build_app_with_due() -> App {

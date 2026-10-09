@@ -1,5 +1,5 @@
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
@@ -22,6 +22,112 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .wrap(Wrap { trim: false })
         .style(Style::default().bg(theme.panel).fg(theme.fg));
     frame.render_widget(para, area);
+}
+
+pub fn render_compact(frame: &mut Frame, area: Rect, app: &App) {
+    let theme = app.theme();
+    super::fill_bg(frame, area, Style::default().bg(theme.panel));
+    let [title, body, meta, tags, notes] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(2.min(area.height.saturating_sub(3))),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .areas(area);
+    let style = Style::default().fg(theme.fg).bg(theme.panel);
+    frame.render_widget(
+        Paragraph::new(" 详情 · Enter 展开").style(style.fg(theme.dim)),
+        title,
+    );
+    let Some(task) = app.cur_task() else {
+        frame.render_widget(Paragraph::new(" （无任务）").style(style), body);
+        return;
+    };
+    frame.render_widget(
+        Paragraph::new(format!(" {}", crate::todo::body_only(&task.raw)))
+            .wrap(Wrap { trim: false })
+            .style(style),
+        body,
+    );
+    let mut metadata = Vec::new();
+    if let Some(p) = task.priority {
+        metadata.push(Span::styled(
+            format!(" ({p}) "),
+            Style::default().fg(theme.priority_color(p)),
+        ));
+    }
+    if let Some(due) = task.due.as_deref() {
+        metadata.push(Span::styled(
+            format!("截止 {due} {}", due_label(due, app.today())),
+            due_token_style(task.done, due, app.today(), theme),
+        ));
+    }
+    if task.done {
+        metadata.push(Span::raw(format!(
+            " 完成 {}",
+            task.done_date.as_deref().unwrap_or("—")
+        )));
+    }
+    frame.render_widget(Paragraph::new(Line::from(metadata)).style(style), meta);
+    let labels = Line::from(vec![
+        Span::styled(
+            format!(
+                " {}",
+                task.projects
+                    .iter()
+                    .map(|p| format!("+{p}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+            Style::default().fg(theme.project),
+        ),
+        Span::styled(
+            format!(
+                " {}",
+                task.contexts
+                    .iter()
+                    .map(|c| format!("@{c}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+            Style::default().fg(theme.context),
+        ),
+    ]);
+    frame.render_widget(Paragraph::new(labels).style(style), tags);
+    frame.render_widget(
+        Paragraph::new(
+            task.notes
+                .iter()
+                .map(|n| format!(" 备注 {n}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .wrap(Wrap { trim: false })
+        .style(style),
+        notes,
+    );
+}
+
+pub fn render_full(frame: &mut Frame, area: Rect, app: &App) {
+    let theme = app.theme();
+    super::fill_bg(frame, area, Style::default().bg(theme.panel));
+    let para = Paragraph::new(build_lines(
+        theme,
+        app.cur_task(),
+        app.today(),
+        usize::from(area.width.saturating_sub(2)).max(1),
+    ))
+    .wrap(Wrap { trim: false })
+    .style(Style::default().fg(theme.fg).bg(theme.panel));
+    let max_scroll = para
+        .line_count(area.width)
+        .saturating_sub(usize::from(area.height))
+        .min(usize::from(u16::MAX)) as u16;
+    let scroll = app.detail_scroll.get().min(max_scroll);
+    app.detail_scroll.set(scroll);
+    app.detail_page_height.set(area.height);
+    frame.render_widget(para.scroll((scroll, 0)), area);
 }
 
 fn build_lines<'a>(

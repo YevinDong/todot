@@ -74,24 +74,60 @@ pub fn draw(frame: &mut Frame, app: &App) {
         (false, true) => vec![Constraint::Min(MIN_BODY_W), Constraint::Length(right_w)],
         (false, false) => vec![Constraint::Min(1)],
     };
-    let chunks = Layout::horizontal(constraints).split(body_area);
-
-    let (left_area, center_area, right_area) = match (show_left, show_right) {
-        (true, true) => (Some(chunks[0]), chunks[1], Some(chunks[2])),
-        (true, false) => (Some(chunks[0]), chunks[1], None),
-        (false, true) => (None, chunks[0], Some(chunks[1])),
-        (false, false) => (None, chunks[0], None),
+    let compact = is_compact(area);
+    let (left_area, center_area, right_area) = if compact {
+        // Keep at least 8 rows for the list; keyboard resize shrinks previews first.
+        let spare = body_area.height.saturating_sub(8);
+        let filter_h = if show_left {
+            filters::compact_height(app).min(spare)
+        } else {
+            0
+        };
+        let detail_h = if show_right {
+            (body_area.height / 3)
+                .min(12)
+                .min(spare.saturating_sub(filter_h))
+        } else {
+            0
+        };
+        let [list, filters, detail] = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(filter_h),
+            Constraint::Length(detail_h),
+        ])
+        .areas(body_area);
+        (
+            show_left.then_some(filters),
+            list,
+            show_right.then_some(detail),
+        )
+    } else {
+        let chunks = Layout::horizontal(constraints).split(body_area);
+        match (show_left, show_right) {
+            (true, true) => (Some(chunks[0]), chunks[1], Some(chunks[2])),
+            (true, false) => (Some(chunks[0]), chunks[1], None),
+            (false, true) => (None, chunks[0], Some(chunks[1])),
+            (false, false) => (None, chunks[0], None),
+        }
     };
 
     if let Some(la) = left_area {
-        filters::render(frame, la, app);
+        if compact {
+            filters::render_compact(frame, la, app);
+        } else {
+            filters::render(frame, la, app);
+        }
     }
     match app.view() {
         View::List => list::render(frame, center_area, app),
         View::Archive => archive::render(frame, center_area, app),
     }
     if let Some(ra) = right_area {
-        detail::render(frame, ra, app);
+        if compact {
+            detail::render_compact(frame, ra, app);
+        } else {
+            detail::render(frame, ra, app);
+        }
     }
 
     if app.prefs.layout.status_bar {
@@ -104,6 +140,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     // Overlays
     match app.mode {
+        Mode::Detail => detail::render_full(frame, body_area, app),
         Mode::Insert => {
             let dlg_w: u16 = (u32::from(center_area.width) * 4 / 5)
                 .clamp(u32::from(DIALOG_MIN_W), u32::from(DIALOG_MAX_W))
@@ -180,6 +217,33 @@ pub fn draw(frame: &mut Frame, app: &App) {
     // breaks ratatui's diff width calculation — keep cell symbols pristine.
 }
 
+pub(crate) fn is_compact(area: Rect) -> bool {
+    area.width < LEFT_PANE_W + MIN_BODY_W + RIGHT_PANE_W
+}
+
+/// Clip by display cells, preserving CJK and grapheme clusters.
+pub(crate) fn ellipsize(text: &str, width: usize) -> String {
+    let span = ratatui::text::Span::raw(text);
+    if span.width() <= width {
+        return text.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for g in span.styled_graphemes(Style::default()) {
+        let w = ratatui::text::Span::raw(g.symbol).width();
+        if used + w > width - 1 {
+            break;
+        }
+        out.push_str(g.symbol);
+        used += w;
+    }
+    out.push('…');
+    out
+}
+
 pub(crate) fn centered_in(parent: Rect, w: u16, h: u16) -> Rect {
     let w = w.min(parent.width);
     let h = h.min(parent.height);
@@ -232,7 +296,17 @@ pub(crate) fn keep_cursor_visible(
 
 #[cfg(test)]
 mod tests {
-    use super::keep_cursor_visible;
+    use super::{ellipsize, keep_cursor_visible};
+
+    #[test]
+    fn clips_display_cells_without_splitting_graphemes() {
+        assert_eq!(ellipsize("中文abc", 5), "中文…");
+        assert_eq!(ellipsize("e\u{0301}中文", 4), "e\u{0301}中…");
+        assert_eq!(ellipsize("👩‍💻ab", 3), "👩‍💻…");
+        assert_eq!(ellipsize("中文", 0), "");
+        assert_eq!(ellipsize("中文", 1), "…");
+        assert_eq!(ellipsize("中文", 4), "中文");
+    }
 
     #[test]
     fn no_scroll_when_content_fits() {
