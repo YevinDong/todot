@@ -91,6 +91,12 @@ todot --help
 
 任务编号对应文件行号，从 `1` 开始，可通过 `todot list` 查看。完整命令和参数见 `todot --help`。
 
+## Agent Skill
+
+项目提供符合 [Agent Skills 规范](https://agentskills.io/specification) 的 [`todot` skill](skills/todot/SKILL.md)，包含 CLI 增删改查、JSON 字段解释、优先级与日期、项目与场景、正文及主题路径、待办提醒流程。
+
+**所有写操作都要求先展示变更，再等待用户二次确认**，包括新增、修改、完成、删除、归档、正文、配置和通知计划。此规则是 agent 行为指引，不是 CLI 的强制权限控制。查询与会话内提醒只读执行；skill 本身不提供后台调度或推送，定时通知还需宿主具备调度与通知能力，并单独确认计划。
+
 ## 终端操作
 
 | 按键 | 操作 |
