@@ -2,13 +2,13 @@
 source: tests/snapshots.rs
 expression: buffer_to_text(&buf)
 ---
- 筛 选                       ▶▮◀ /tmp/tuxedo-snapshot.txt  •  15 项   详 情                              
+ 筛 选                       ▶▮◀ /tmp/todot-snapshot.txt  •  15 项 任  详 情                              
                                                                                                     
  项 目                       (2)  优 先 级  A  ──────────────────────── 优 先 级     (A)                    
    +work             4      1 [x] ▸ (A) Finish Q2 board deck +work 创 建 日 期   2026-05-01             
    +health           3      2 [x]   (A) Call dentist to reschedule 截 止 日 期   2026-05-06  今 天        
    +finance          2     (3)  优 先 级  B  ──────────────────────── 项 目       +work                  
-   +home            ┌ tuxedo · 命 令  ───────────────────────────────────────────┐ptop                
+   +home            ┌ todot · 命 令  ────────────────────────────────────────────┐ptop                
    +learning        │ > █                                                      │                    
    +personal        │──────────────────────────────────────────────────────────│                    
    +travel          │ ▶ 新 建 任 务                                              n │                    
@@ -33,4 +33,4 @@ expression: buffer_to_text(&buf)
                                                                                                     
                                                                                                     
                                                                                                     
- 命 令    输 入 以 筛 选  · Enter 执 行  · Esc 取 消       15 项 待 办  · 2 项 已 选  · 2026-05-06 · tuxedo 2026.8.1
+ 命 令    输 入 以 筛 选  · Enter 执 行  · Esc 取 消        15 项 待 办  · 2 项 已 选  · 2026-05-06 · todot 2026.8.1

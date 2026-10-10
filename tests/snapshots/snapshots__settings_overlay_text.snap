@@ -5,11 +5,13 @@ expression: buffer_to_text(&buf)
  ▶▮◀ 设 置   •  19 项 任 务   •  排 序 ： 优 先 级                                                             
                                                                                                     
  文 件                                                                                                
-   待 办 文 件                     /tmp/tuxedo-snapshot.txt                                             
-   配 置 文 件                     /tmp/tuxedo-snapshot.toml                                            
+   待 办 文 件                     /tmp/todot-snapshot.txt                                              
+   配 置 文 件                     /tmp/todot-snapshot.toml                                             
                                                                                                     
  显 示                                                                                                
-   主 题                         Muted Slate ▾  （ T 切 换 ）                                             
+   主 题                         固 定  · Muted Slate （ T 设 置 ）                                         
+   深 色 ／ 浅 色 主 题               Muted Slate / Dawn                                                   
+   终 端 模 式                     未 检 测  （ Ctrl+L 重 测 ）                                                
    行 间 距                       紧 凑  ▾  （ D 切 换 ）                                                    
    行 号                         开 启   （ L 开 关 ）                                                      
    状 态 栏                       开 启                                                                  
@@ -31,6 +33,4 @@ expression: buffer_to_text(&buf)
                                                                                                     
                                                                                                     
                                                                                                     
-                                                                                                    
-                                                                                                    
- 设 置    Esc 返 回                                            15 项 待 办  · 2026-05-06 · tuxedo 2026.8.1
+ 设 置    Esc 返 回                                             15 项 待 办  · 2026-05-06 · todot 2026.8.1

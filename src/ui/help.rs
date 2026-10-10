@@ -63,7 +63,7 @@ const VIEW: Section = (
         ("H", "显示已完成任务"),
         ("F", "显示未来任务"),
         ("[ / ]", "开关筛选 / 详情栏"),
-        ("T", "选择主题"),
+        ("T", "设置固定／深浅主题"),
         ("D", "切换行间距"),
         ("L", "开关行号"),
     ],
@@ -75,6 +75,7 @@ const SYSTEM: Section = (
         (": / Ctrl-P", "命令菜单"),
         ("s", "手机录入二维码"),
         ("? / ,", "帮助 / 设置"),
+        ("Ctrl+L", "重测／重绘（保留输入）"),
         ("q / Ctrl-c", "退出"),
     ],
 );
@@ -101,7 +102,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .title(Line::from(vec![
             Span::raw(" "),
             Span::styled(
-                "tuxedo",
+                "todot",
                 Style::default()
                     .fg(theme.accent)
                     .add_modifier(Modifier::BOLD),

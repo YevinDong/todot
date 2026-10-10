@@ -2,7 +2,7 @@
 source: tests/snapshots.rs
 expression: buffer_to_text(&buf)
 ---
- 筛 选                       ▶▮◀ /tmp/tuxedo-snapshot.txt  •  0 项 任  详 情                              
+ 筛 选                       ▶▮◀ /tmp/todot-snapshot.txt  •  0 项 任   详 情                              
                                                                                                     
  项 目                                                               （ 无 任 务 ）                        
    添 加 标 签  +project                                                                                
@@ -10,7 +10,7 @@ expression: buffer_to_text(&buf)
  场 景                                                                                                
    添 加 标 签  @context                                                                                
                                                                                                     
-                      ┌ tuxedo · 欢 迎  ───────────────────────────────────────┐                      
+                      ┌ todot · 欢 迎  ────────────────────────────────────────┐                      
                       │                    ██          ██                    │                      
                       │                    ████  ██  ████                    │                      
                       │                    ██████████████                    │                      
@@ -33,4 +33,4 @@ expression: buffer_to_text(&buf)
                                                                                                     
                                                                                                     
                                                                                                     
- 欢 迎    c 创 建  todo.txt · s 打 开 示 例  · q 退 出                0 项 待 办  · 2026-05-06 · tuxedo 2026.8.1
+ 欢 迎    c 创 建  todo.txt · s 打 开 示 例  · q 退 出                 0 项 待 办  · 2026-05-06 · todot 2026.8.1

@@ -36,43 +36,8 @@ pub enum InstallKind {
 /// instructions. Exits with code 0 on success; the caller (`main`) should
 /// `return Ok(())` after invoking this.
 pub fn run() -> io::Result<()> {
-    let exe = std::env::current_exe().ok();
-    let kind = exe
-        .as_deref()
-        .map(detect_kind)
-        .unwrap_or(InstallKind::Unknown);
-    let current = env!("CARGO_PKG_VERSION");
-    println!("tuxedo {current}");
-    if let Some(p) = &exe {
-        println!("installed at: {}", p.display());
-    }
-    println!();
-    match kind {
-        InstallKind::Homebrew => {
-            println!("Looks like a Homebrew install. Update with:");
-            println!();
-            println!("    brew update && brew upgrade webstonehq/tap/tuxedo");
-        }
-        InstallKind::Cargo => {
-            println!("Looks like a `cargo install` build. Update with:");
-            println!();
-            println!("    cargo install --git https://github.com/webstonehq/tuxedo --force");
-        }
-        InstallKind::Binary => {
-            println!("Looks like a downloaded binary. Grab the latest from:");
-            println!();
-            println!("    https://github.com/webstonehq/tuxedo/releases/latest");
-            println!();
-            println!("...and replace the file above.");
-        }
-        InstallKind::Unknown => {
-            println!("Could not detect the install method. Options:");
-            println!();
-            println!("    brew upgrade webstonehq/tap/tuxedo");
-            println!("    cargo install --git https://github.com/webstonehq/tuxedo --force");
-            println!("    https://github.com/webstonehq/tuxedo/releases/latest");
-        }
-    }
+    println!("todot {}（中文定制版）", env!("CARGO_PKG_VERSION"));
+    println!("请在项目目录重新运行 ./install.sh，从当前仓库源码编译。");
     Ok(())
 }
 

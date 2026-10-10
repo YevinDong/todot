@@ -9,7 +9,7 @@ use crate::core::Store;
 use crate::core::outcome::{DrainReport, Reconcile};
 use crate::note;
 use crate::serve::{self, ShareInfo};
-use crate::theme::{self, Theme};
+use crate::theme::{self, ColorMode, Theme};
 use crate::todo::Task;
 
 mod autocomplete;
@@ -45,7 +45,7 @@ pub use draft_overlay::{
 };
 pub use flash::Flash;
 pub use palette::CommandPaletteState;
-pub use prefs::{Layout, Prefs};
+pub use prefs::{Layout, Prefs, ThemePrefs, ThemeSlot};
 pub use selection::Selection;
 pub use types::{
     AUTOCOMPLETE_CAP, AddOutcome, Density, FLASH_TTL, Filter, LEADER_WINDOW, Mode, SavedFilter,
@@ -161,9 +161,12 @@ pub struct App {
     /// Path queued for opening in the user's editor after the TUI temporarily
     /// restores the terminal. Set by OpenNote and drained by the run loop.
     pending_editor_path: Option<PathBuf>,
-    /// Theme index captured when the theme picker opened, so cancel
-    /// can restore it.
-    theme_pick_orig: usize,
+    /// Only theme preferences are snapshotted; terminal detection remains live.
+    theme_pick_orig: Option<ThemePrefs>,
+    pub theme_pick_slot: ThemeSlot,
+    theme_pick_return: Mode,
+    pub terminal_mode: Option<ColorMode>,
+    pub theme_detection_status: &'static str,
     pub week_start: WeekStart,
 }
 
@@ -229,7 +232,11 @@ impl App {
             share: None,
             notes_dir: note_dir,
             pending_editor_path: None,
-            theme_pick_orig: 0,
+            theme_pick_orig: None,
+            theme_pick_slot: ThemeSlot::Fixed,
+            theme_pick_return: Mode::Normal,
+            terminal_mode: None,
+            theme_detection_status: "未检测",
             week_start: WeekStart::Sunday,
         };
         app.recompute_visible();
@@ -258,7 +265,7 @@ impl App {
     /// config, reuse them so phone bookmarks survive across sessions.
     /// Otherwise, generate a fresh token, let the OS pick a port, and
     /// write both back to the config. If the persisted port is taken
-    /// (another tuxedo instance on the same machine, say), fall back to
+    /// (another todot instance on the same machine, say), fall back to
     /// an OS-assigned port and rewrite the config so the next session
     /// starts fresh.
     pub fn ensure_share_started(&mut self) -> Result<&ShareInfo, String> {
@@ -377,48 +384,82 @@ impl App {
     }
 
     pub fn cycle_theme(&mut self) {
-        let msg = self.prefs.cycle_theme();
+        let msg = self.prefs.cycle_theme(self.terminal_mode);
         self.flash(msg);
         self.save_prefs();
     }
 
-    /// Enter theme picker mode. Snapshot the current theme index so
-    /// cancel can restore it. j/k/T live-previews; Enter accepts; Esc
-    /// reverts.
-    pub fn enter_pick_theme(&mut self) {
-        self.theme_pick_orig = self.prefs.theme_idx();
-        self.mode = Mode::PickTheme;
+    pub fn set_terminal_mode(&mut self, mode: ColorMode, inferred: bool) {
+        self.terminal_mode = Some(mode);
+        self.theme_detection_status = match (mode, inferred) {
+            (ColorMode::Dark, false) => "深色（终端）",
+            (ColorMode::Light, false) => "浅色（终端）",
+            (ColorMode::Dark, true) => "深色（背景推断）",
+            (ColorMode::Light, true) => "浅色（背景推断）",
+        };
+        if self.mode != Mode::PickTheme {
+            self.prefs.apply_terminal_mode(self.terminal_mode);
+        }
     }
 
-    /// Step through themes in `forward` (true = next) direction with
-    /// wrap-around. The theme is applied immediately for live preview.
+    /// Preview each slot independently; commit all slots together.
+    pub fn enter_pick_theme(&mut self) {
+        self.theme_pick_orig = Some(self.prefs.themes);
+        self.theme_pick_return = self.mode;
+        self.theme_pick_slot = self.prefs.themes.active_slot(self.terminal_mode);
+        self.mode = Mode::PickTheme;
+        self.prefs
+            .set_theme_idx(self.prefs.themes.index(self.theme_pick_slot));
+    }
+
+    pub fn pick_theme_slot_step(&mut self, forward: bool) {
+        self.theme_pick_slot = match (self.theme_pick_slot, forward) {
+            (ThemeSlot::Fixed, true) | (ThemeSlot::Light, false) => ThemeSlot::Dark,
+            (ThemeSlot::Dark, true) | (ThemeSlot::Fixed, false) => ThemeSlot::Light,
+            _ => ThemeSlot::Fixed,
+        };
+        self.prefs
+            .set_theme_idx(self.prefs.themes.index(self.theme_pick_slot));
+    }
+
+    pub fn pick_theme_toggle_auto(&mut self) {
+        self.prefs.themes.auto = !self.prefs.themes.auto;
+    }
+
+    /// j/k/T live-preview the selected slot, with wrap-around.
     pub fn pick_theme_step(&mut self, forward: bool) {
-        let all = theme::all();
-        let len = all.len();
-        if len <= 1 {
-            return;
-        }
-        let cur = self.prefs.theme_idx();
+        let len = theme::all().len();
+        let cur = self.prefs.themes.index(self.theme_pick_slot);
         let next = if forward {
             (cur + 1) % len
         } else {
             (cur + len - 1) % len
         };
-        self.prefs.set_theme_idx(next);
+        self.prefs.set_slot_theme(self.theme_pick_slot, next);
     }
 
-    /// Accept the previewed theme and persist to config.
     pub fn pick_theme_accept(&mut self) {
-        self.mode = Mode::Normal;
-        self.save_prefs();
-        self.flash(format!("主题：{}", self.theme().name));
+        if let Err(e) = self.prefs.save() {
+            self.flash(format!("保存配置失败：{e}"));
+            return;
+        }
+        self.mode = self.theme_pick_return;
+        self.theme_pick_orig = None;
+        self.prefs.apply_terminal_mode(self.terminal_mode);
+        self.flash(format!(
+            "{}：{}",
+            self.prefs.themes.mode_label(),
+            self.theme().name
+        ));
     }
 
-    /// Cancel the picker and restore the theme that was active when
-    /// the picker opened.
+    /// Cancel all theme edits; apply the latest detection, not a stale preview.
     pub fn pick_theme_cancel(&mut self) {
-        self.prefs.set_theme_idx(self.theme_pick_orig);
-        self.mode = Mode::Normal;
+        if let Some(original) = self.theme_pick_orig.take() {
+            self.prefs.themes = original;
+        }
+        self.mode = self.theme_pick_return;
+        self.prefs.apply_terminal_mode(self.terminal_mode);
     }
 
     pub fn cycle_density(&mut self) {
@@ -647,6 +688,7 @@ impl App {
     /// layout changes take effect immediately.
     pub fn reload_config(&mut self, new_cfg: Config) {
         self.prefs = Prefs::from_config(new_cfg.clone());
+        self.prefs.apply_terminal_mode(self.terminal_mode);
         self.saved_filters = new_cfg
             .filters
             .iter()

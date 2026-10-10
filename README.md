@@ -1,10 +1,10 @@
-# todo-tui：中文 Linux 待办终端
+# todot：中文 Linux 待办终端
 
 基于 [Tuxedo v2026.8.1](https://github.com/webstonehq/tuxedo/releases/tag/v2026.8.1) 的中文定制版。**修改后的 Rust 源码直接保存在本仓库**，新环境克隆后即可重新构建；后续直接改 `src/`，不再维护汉化补丁。
 
-上游来源、修改范围及 MIT 许可证见 [UPSTREAM.md](UPSTREAM.md) 和 [LICENSE](LICENSE)。Cargo 包和可执行文件仍叫 `tuxedo`，GitHub 仓库叫 `todo-tui`。
+上游来源、修改范围及 MIT 许可证见 [UPSTREAM.md](UPSTREAM.md) 和 [LICENSE](LICENSE)。项目、GitHub 仓库、Cargo 包和可执行文件统一叫 `todot`。
 
-列表只显示任务标题与属性；正文使用内置多行编辑器录入，在侧栏或居中的详情弹窗中查看。个人待办、正文和设置默认保存在 `~/.todo-tui/`，不进入 Git。
+列表只显示任务标题与属性；正文使用内置多行编辑器录入，在侧栏或居中的详情弹窗中查看。个人待办、正文和设置默认保存在 `~/.todot/`，不进入 Git。
 
 ## 新环境安装
 
@@ -20,25 +20,26 @@ sudo apt install -y git build-essential curl util-linux python3
 本仓库是私有仓库，需要有访问权限的 GitHub SSH 密钥：
 
 ```bash
-git clone git@github.com:YevinDong/todo-tui.git
-cd todo-tui
+git clone git@github.com:YevinDong/todot.git
+cd todot
 ./install.sh
-./start.sh
+export PATH="$HOME/.local/bin:$PATH"  # 加入 ~/.bashrc 或对应 shell 配置
+todot
 ```
 
-也可以用已登录的 GitHub CLI 克隆：`gh repo clone YevinDong/todo-tui`。
+也可以用已登录的 GitHub CLI 克隆：`gh repo clone YevinDong/todot`。
 
 - `install.sh` 只编译当前仓库源码，不下载或覆盖上游源码。
 - Rust 版本由 `rust-toolchain.toml` 固定为 `1.99.0`，依赖由 `Cargo.lock` 固定；构建使用 `--locked`。
-- Rust 工具链、依赖缓存、编译结果与最终二进制均保存在项目 `.local/`，不修改系统 PATH。
+- Rust 工具链、依赖缓存与编译结果保存在项目 `.local/`；二进制安装到 `~/.local/bin/todot`，也可用 `INSTALL_DIR=/usr/local/bin ./install.sh` 指定 PATH 内的安装目录（需要写入权限）。
 - 首次构建需要联网访问 Rust 下载服务和 crates.io，耗时与机器配置有关；缓存完整后可复用。
-- 待办、正文及设置默认保存在当前用户的 `~/.todo-tui/`，与项目目录分离。
-- 首次启动复用该用户已有数据；没有旧数据时创建空 `~/.todo-tui/todo.txt`。
-- 从其他目录运行 `/完整路径/todo-tui/start.sh`，仍使用同一用户的数据与配置。
+- 待办、正文及设置默认保存在当前用户的 `~/.todot/`，与项目目录分离。
+- 首次启动复用该用户已有数据；没有旧数据时创建空 `~/.todot/todo.txt`。
+- 在任何目录直接运行 `todot`，默认使用同一用户的数据；不会隐式读取当前目录的 `todo.txt`。
 
 ## 常用操作
 
-以下为默认快捷键；自定义绑定保存在数据目录的 `config/tuxedo/keybinds.toml`。
+以下为默认快捷键；自定义绑定保存在数据目录的 `config/todot/keybinds.toml`。
 
 | 按键 | 操作 |
 |---|---|
@@ -52,6 +53,7 @@ cd todo-tui
 | `dd` | 连续按两次 `d` 删除；待办删除可用 `u` 撤销，归档删除不可撤销 |
 | `a` | 在待办与归档（`done.txt`）视图间切换 |
 | `A` | 将已完成的待办移入归档 |
+| `H` | 在当前列表显示 / 隐藏已完成但未归档的任务 |
 | `t` | 显示 / 隐藏未来任务 |
 | `:` | 命令菜单，可输入中文搜索 |
 | `Enter` | 打开居中的详情弹窗，优先显示正文；`j/k` 滚动、`PgUp/PgDn` 翻页、`Home/End` 首尾、`Esc` 返回 |
@@ -59,7 +61,8 @@ cd todo-tui
 | `?` / `,` | 帮助 / 设置 |
 | `O` | 可选：使用外部编辑器打开笔记，依次尝试 `VISUAL`、`EDITOR`、`nvim`、`vim`、`vi` |
 | `s` | 手机录入二维码 |
-| `Ctrl+L` | 强制重绘当前界面，保留未保存输入 |
+| `T` | 设置固定主题及深色／浅色主题 |
+| `Ctrl+L` | 重新检测终端深浅模式并强制重绘，保留未保存输入 |
 | `q` | 在主列表中退出 |
 
 任务按 `todo.txt` 格式保存，例如：
@@ -68,6 +71,29 @@ cd todo-tui
 (A) 整理发布说明 +工作 @电脑 due:2026-10-20
 每周整理笔记 +个人 @家里 due:2026-10-25 rec:1w
 ```
+
+### 深色／浅色主题
+
+按 `T` 打开主题设置（设置页也使用同一选择器）：
+
+- `m`：切换固定模式／跟随终端。
+- `Tab` / `Shift-Tab`：选择固定／回退、深色、浅色槽位。
+- `j/k` / 上下箭头 / `T`：预览所选槽位的主题；允许两个槽位选择同一主题。
+- `Enter`：保存全部主题设置；`Esc`：取消全部修改，返回原页面。
+- `Ctrl+L`：重新检测并重绘，不丢失未保存的标题、正文或主题预览。
+
+示例配置（旧配置没有 `theme_mode` 时保持固定模式）：
+
+```toml
+theme = Muted Slate
+theme_mode = auto
+theme_dark = Nord
+theme_light = Dawn
+```
+
+跟随模式在启动或启用时检测终端；改变终端配色后按 `Ctrl+L` 更新。优先查询终端明确的深浅偏好（CSI ? 996），无响应时查询默认背景（OSC 11），用亮度推断。检测异步进行，每阶段等待最多 300ms，不阻塞输入。启动检测失败使用 `theme` 回退；后续失败保留最近的主题。不存在的主题名回退到固定主题。
+
+跟随的是终端，不直接查询操作系统。终端必须支持并传递查询响应；SSH、tmux 等中间层可能影响检测。当前不订阅实时变化通知；Windows 使用固定主题回退。选择器打开期间不会被检测结果打断，关闭后应用最新结果。自动切换不写配置，其他设置保存和配置热加载会保留双主题槽位。
 
 ### 内置正文编辑
 
@@ -113,56 +139,63 @@ cd todo-tui
 
 终端不足 100 列时，列表全宽，筛选与详情移到下方。筛选最多 3 行，当前选项优先显示；详情为预览，按 `Enter` 查看完整内容。高度不足时优先保留列表，隐藏的详情仍可展开。旋转屏幕或弹出键盘时自动调整，不修改面板开关设置。
 
-切回终端、调整窗口大小及外部编辑器返回时会完整重绘。若终端不发送焦点通知或仍出现残影，按 `Ctrl+L`。
+切回终端后延迟 300ms 完整重绘，期间仍可输入；再次失焦会取消待执行重绘。调整窗口大小及外部编辑器返回时立即完整重绘。若终端不发送焦点通知或仍出现残影，按 `Ctrl+L`。
 
 ## 数据与隐私
 
 | 本地路径 | 用途 | 是否进入 Git |
 |---|---|---|
-| `~/.todo-tui/todo.txt` | 当前待办 | 否 |
-| `~/.todo-tui/done.txt` | 已完成归档 | 否 |
-| `~/.todo-tui/inbox.txt` | 手机录入或待处理条目 | 否 |
-| `~/.todo-tui/notes/` | 正文及任务笔记 | 否 |
-| `~/.todo-tui/config/` | 设置、快捷键、主题、手机访问令牌等 | 否 |
+| `~/.todot/todo.txt` | 当前待办 | 否 |
+| `~/.todot/done.txt` | 已完成归档 | 否 |
+| `~/.todot/inbox.txt` | 手机录入或待处理条目 | 否 |
+| `~/.todot/notes/` | 正文及任务笔记 | 否 |
+| `~/.todot/config/` | 设置、快捷键、主题、手机访问令牌等 | 否 |
 | `项目/.local/` | 工具链、缓存、二进制、临时检查资料 | 否 |
 | `项目/todo.md` | 原有文件，不读取、不导入、不修改 | 否 |
 
-**GitHub 只保存工程代码，不同步个人待办。** 数据根目录权限为 `700`，新文件默认只允许当前用户访问。常用设置文件为 `~/.todo-tui/config/tuxedo/config.toml`；`config/` 包含手机访问令牌，不应公开。
+**GitHub 只保存工程代码，不同步个人待办。** 数据根目录权限为 `700`，新文件默认只允许当前用户访问。常用设置文件为 `~/.todot/config/todot/config.toml`；`config/` 包含手机访问令牌，不应公开。
 
-### 旧项目迁移
+### 旧数据迁移
 
-1. 正常退出旧 TUI。迁移脚本检测到本项目的 TUI 仍在运行时会拒绝迁移。
-2. 运行 `./start.sh`。目标数据目录不存在且项目中有旧 `todo.txt` 时，自动复制旧待办、归档、收件箱、正文和 `.config/`，校验一致后启用新目录。
-3. 确认新程序中的任务及正文正确。项目中的旧文件保留为备份，新版不再读取它们。
+先按 `q` 正常退出旧 TUI，再复制数据：
 
-也可显式运行 `./migrate-data.sh`。**目标已存在时绝不覆盖或合并，也不重复导入旧项目数据。** `.config/` 复制到新目录的 `config/`；相对 `note:` 关联随正文目录迁移，绝对外部笔记路径保持不变，不搬动外部文件。
+```bash
+./migrate-data.sh "$HOME/.todo-tui" "$HOME/.todot"
+todot
+```
+
+脚本使用 `cp -a` 复制待办、归档、收件箱、正文和配置，验证内容，保留旧目录。旧 `config/tuxedo/` 改为 `config/todot/`；旧项目 `.config/` 复制为 `config/`。不传参数时优先从 `~/.todo-tui` 迁移，否则从旧项目目录迁移。**目标已存在时拒绝覆盖或合并；复制失败保留已复制文件并报错，需检查后再启动。** 相对 `note:` 关联继续使用，绝对外部笔记路径不搬动。
+
+`x` 只标记完成，任务仍在 `todo.txt`；`H` 可查看。按 `A` 才移入 `done.txt`，之后按 `a` 查看归档。
 
 ### 备份与独立数据
 
-换机器前退出 TUI，再安全复制整个 `~/.todo-tui/`，包含待办、归档、正文和配置；只复制 `todo.txt` 不会带上正文。新机器克隆代码并构建后，`./start.sh` 会复用已有用户数据。
+换机器前退出 TUI，再安全复制整个 `~/.todot/`，包含待办、归档、正文和配置；只复制 `todo.txt` 不会带上正文。新机器克隆代码并构建后，`todot` 会复用已有用户数据。
 
 需要另一套独立数据时，指定专用目录的绝对路径，不要使用系统目录或混有其他文件的目录：
 
 ```bash
-TODO_TUI_HOME=/完整路径/另一套数据 ./start.sh
+TODO_DIR=/完整路径/另一套数据 todot
+# 如果是迁移已有数据，先退出程序，再复制到不存在的新目录：
+./migrate-data.sh "$HOME/.todot" /完整路径/另一套数据
 ```
 
 ### 启动与命令行
 
-数据目录隔离由 `start.sh` 管理；直接运行 `.local/bin/tuxedo` 仍使用原始 CLI 的路径规则。建议始终使用启动脚本：
+无需启动脚本，路径规则由程序自身处理，TUI 与 CLI 一致：
 
 ```bash
-./start.sh              # 打开 TUI
-./start.sh list         # 命令行查看待办
-./start.sh --json list  # JSON 输出，供脚本读取
-./start.sh --help       # 查看命令
+todot              # 打开 TUI
+todot list         # 命令行查看待办
+todot --json list  # JSON 输出，供脚本读取
+todot --help       # 查看命令
 ```
 
-`start.sh` 固定用户数据和配置路径，覆盖继承的 `TODO_DIR` / `TODO_FILE` / `DONE_FILE` / `NOTES_DIR` / `XDG_CONFIG_HOME`，拒绝其他文件路径、`--sample` 及未知命令。`--help` / `--version` 不触碰数据。
+待办路径优先级：显式 `todot FILE` → `TODO_FILE` → `TODO_DIR/todo.txt` → `~/.todot/todo.txt`。归档默认是待办文件旁的 `done.txt`，可用 `DONE_FILE` 覆盖。配置默认 `<数据根目录>/config/todot/`，保留 `XDG_CONFIG_HOME` 覆盖；正文默认 `<数据根目录>/notes/`，保留 `NOTES_DIR` 和配置中的 `notes_dir` 覆盖。数据根目录为 `TODO_DIR` 或 `~/.todot`。其他参数（包括 `--sample`）保留；帮助和版本不触碰数据。
 
 ### 手机录入
 
-在 TUI 按 `s`，会启动局域网 HTTP 服务。仅在可信局域网使用：HTTP 不加密，URL 中的访问令牌不应分享。关闭二维码弹窗不会停止服务，退出 Tuxedo 才会停止。
+在 TUI 按 `s`，会启动局域网 HTTP 服务。仅在可信局域网使用：HTTP 不加密，URL 中的访问令牌不应分享。关闭二维码弹窗不会停止服务，退出 todot 才会停止。
 
 ## 继续开发
 
@@ -172,8 +205,10 @@ TODO_TUI_HOME=/完整路径/另一套数据 ./start.sh
 src/                        Rust 程序源码与手机页面
 Cargo.toml / Cargo.lock      包信息与锁定依赖
 rust-toolchain.toml          固定 Rust 工具链
-install.sh / start.sh        构建与用户数据隔离启动
+install.sh                  构建并安装全局 todot 命令
 migrate-data.sh              旧项目数据复制、验证与安全迁移
+vendor/crossterm/            带终端主题响应解析补丁的 crossterm 0.29（MIT）
+tests/theme_terminal.py     深浅检测、主题设置及查询期间输入回归
 tests/check.py              用户数据隔离、正文交互与终端恢复回归
 tests/snapshots.rs           界面快照、正文与详情弹窗渲染回归
 tests/snapshots/             中文界面的快照基线
@@ -183,21 +218,22 @@ tests/snapshots/             中文界面的快照基线
 修改 `src/` 后：
 
 ```bash
-bash -n install.sh start.sh migrate-data.sh
+bash -n install.sh migrate-data.sh
 ./install.sh --test
 python3 tests/check.py
-./start.sh
+python3 tests/theme_terminal.py
+todot
 ```
 
 `--test` 会检查库、主程序、界面快照和文档测试；Rust 测试的配置隔离在 `.local/test-config/`。Python 检查使用 `.local/` 下的临时项目和隔离 HOME，验证数据迁移、路径隔离、中文输入/归档、正文多行粘贴与详情、删除联动与撤销、CLI 删除、焦点恢复、缩放、编辑器返回，以及 `Ctrl+L` 保留输入，不修改真实待办。
 
-构建成功只会替换 `.local/bin/tuxedo`，已运行的旧进程不会自动更新。请正常退出旧 TUI，再启动新版。
+构建成功替换安装目录中的 `todot` 和项目 `.local/bin/todot`，已运行的旧进程不会自动更新。请正常退出旧 TUI，再启动新版。
 
 提交代码：
 
 ```bash
 git status --short
-git add README.md src tests start.sh migrate-data.sh
+git add README.md src tests install.sh migrate-data.sh Cargo.toml Cargo.lock
 # 按实际修改补充其他工程文件；不要使用 -f 强制加入个人数据
 git diff --cached --stat
 git diff --cached --check
@@ -222,4 +258,4 @@ python3 tests/check.py
 
 ## 上游更新
 
-本项目独立维护，官方自更新指引已在启动脚本中关闭。`./start.sh update` 只提示重新编译；它不会安装官方英文二进制。上游升级需要手动移植并验证，详见 [UPSTREAM.md](UPSTREAM.md)。
+本项目独立维护，不在启动时检查上游更新。`todot update` 只提示重新编译；它不会安装官方英文二进制。上游升级需要手动移植并验证，详见 [UPSTREAM.md](UPSTREAM.md)。

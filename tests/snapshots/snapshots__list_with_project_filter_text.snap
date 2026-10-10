@@ -2,7 +2,7 @@
 source: tests/snapshots.rs
 expression: buffer_to_text(&buf)
 ---
- 筛 选                       ▶▮◀ /tmp/tuxedo-snapshot.txt  •  4 项 任  详 情                              
+ 筛 选                       ▶▮◀ /tmp/todot-snapshot.txt  •  4 项 任   详 情                              
                                                                                                     
  项 目                       (1)  优 先 级  A  ──────────────────────── 优 先 级     (A)                    
  ▸ +work             4      1 ▸ (A) Finish Q2 board deck +work @la 创 建 日 期   2026-05-01             
@@ -33,4 +33,4 @@ expression: buffer_to_text(&buf)
                                                                                                     
                                                                                                     
                                                                                                     
- 普 通    j/k 移 动  · n 新 建  · x 完 成  · / 搜 索  · ? 帮 助  · u 撤  4 项 待 办  · 2026-05-06 · tuxedo 2026.8.1
+ 普 通    j/k 移 动  · n 新 建  · x 完 成  · / 搜 索  · ? 帮 助  · u 撤 销 4 项 待 办  · 2026-05-06 · todot 2026.8.1

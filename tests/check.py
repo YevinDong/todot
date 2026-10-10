@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""隔离项目数据，检查启动脚本、中文 TUI 和 UTF-8 任务往返。"""
+"""隔离用户数据，检查原生命令、中文 TUI 和 UTF-8 任务往返。"""
 import fcntl
 import json
 import os
@@ -16,7 +16,7 @@ import termios
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-BINARY = ROOT / '.local/bin/tuxedo'
+BINARY = ROOT / '.local/bin/todot'
 assert BINARY.is_file(), '先运行 ./install.sh'
 
 # GitHub 只保存工程；真实待办、令牌和构建缓存必须保持未跟踪。
@@ -31,19 +31,19 @@ if (ROOT / '.git').exists():
 with tempfile.TemporaryDirectory(prefix='中文检查 ', dir=ROOT / '.local') as temp:
     project = Path(temp) / '待办 项目'
     (project / '.local/bin').mkdir(parents=True)
-    shutil.copy2(ROOT / 'start.sh', project / 'start.sh')
-    shutil.copy2(ROOT / 'migrate-data.sh', project / 'migrate-data.sh')
-    launcher = project / 'start.sh'
+    launcher = project / '.local/bin/todot'
+    shutil.copy2(BINARY, launcher)
     home = Path(temp) / '用户目录'
-    data = home / '.todo-tui'
+    data = home / '.todot'
     editor = project / '编辑器.sh'
     editor.write_text("#!/bin/sh\nprintf 'EDITOR_SENTINEL\\n'\n")
     editor.chmod(0o755)
     env = dict(os.environ, TERM='xterm-256color', LANG='C.UTF-8',
                HOME=str(home), VISUAL=str(editor), EDITOR=str(project / '不存在的编辑器'))
-    env.pop('TODO_TUI_HOME', None)
-    # 模拟环境中已有其他待办路径；启动脚本不能误写它们。
-    env.update(TODO_FILE=str(Path(temp) / '外部.txt'), DONE_FILE=str(Path(temp) / '外部归档.txt'))
+    for key in ['TODO_TUI_HOME', 'TODO_DIR', 'TODO_FILE', 'DONE_FILE', 'NOTES_DIR', 'XDG_CONFIG_HOME']:
+        env.pop(key, None)
+    cwd_todo = Path(temp) / 'todo.txt'
+    cwd_todo.write_text('当前目录任务不应隐式打开\n')
 
     def run(*args, expected=0):
         result = subprocess.run([str(launcher), *args], cwd=temp, env=env,
@@ -51,16 +51,11 @@ with tempfile.TemporaryDirectory(prefix='中文检查 ', dir=ROOT / '.local') as
         assert result.returncode == expected, result.stderr
         return result.stdout + result.stderr
 
-    assert '尚未安装' in run('--help', expected=1)
-    shutil.copy2(BINARY, project / '.local/bin/tuxedo')
-    assert '中文定制版' in run('--version')
+    assert 'todot' in run('--version')
     assert '用法：' in run('--help')
     assert '中文定制版' in run('update')
-    assert '需要终端' in run(expected=1)
-    assert '示例模式' in run('--sample', expected=2)
-    wrong_file = Path(temp) / '误传.txt'
-    assert '未知命令' in run(str(wrong_file), expected=2)
-    assert not wrong_file.exists()
+    assert not data.exists(), '帮助和版本不能创建数据'
+    assert '未知选项' in run('--unknown', expected=2)
 
     raw = '(A) 检查中文保存 +工作 @电脑 due:2099-12-31'
     run('add', raw)
@@ -70,8 +65,23 @@ with tempfile.TemporaryDirectory(prefix='中文检查 ', dir=ROOT / '.local') as
     assert not (project / '.config').exists()
     assert data.stat().st_mode & 0o777 == 0o700
     assert '检查中文保存' in json.dumps(listing, ensure_ascii=False)
-    assert not (Path(temp) / '外部.txt').exists()
-    assert not (Path(temp) / '外部归档.txt').exists()
+    assert cwd_todo.read_text() == '当前目录任务不应隐式打开\n'
+
+    # 明确指定的环境变量仍生效，TUI 和 CLI 共用同一解析器。
+    override = Path(temp) / '独立数据'
+    override_env = dict(env, TODO_DIR=str(override))
+    result = subprocess.run([str(launcher), 'add', '独立任务'], env=override_env,
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert '独立任务' in (override / 'todo.txt').read_text()
+    explicit_file, explicit_done = override / '指定.txt', override / '归档.txt'
+    override_env.update(TODO_FILE=str(explicit_file), DONE_FILE=str(explicit_done))
+    for args in [('add', '指定任务'), ('done', '1'), ('archive',)]:
+        result = subprocess.run([str(launcher), *args], env=override_env,
+                                capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+    assert '指定任务' in explicit_done.read_text()
+    assert '指定任务' not in (override / 'todo.txt').read_text()
 
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 160, 0, 0))
@@ -88,13 +98,13 @@ with tempfile.TemporaryDirectory(prefix='中文检查 ', dir=ROOT / '.local') as
     def plain(text):
         return re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', text)
 
-    def screen(keys=b'', *, raw=False):
+    def screen(keys=b'', *, raw=False, duration=1.5):
         if keys:
             os.write(master, keys)
         output = bytearray()
-        deadline = time.monotonic() + 1.5
+        deadline = time.monotonic() + duration
         while time.monotonic() < deadline:
-            if select.select([master], [], [], 0.1)[0]:
+            if select.select([master], [], [], min(0.1, max(0, deadline - time.monotonic())))[0]:
                 try:
                     chunk = os.read(master, 65536)
                 except OSError:
@@ -109,8 +119,13 @@ with tempfile.TemporaryDirectory(prefix='中文检查 ', dir=ROOT / '.local') as
         initial = screen(raw=True)
         assert '优先级' in plain(initial)
         assert '\x1b[?1004h' in initial, '启动时应启用终端焦点通知'
-        focused = screen(b'\x1b[O\x1b[I', raw=True)
-        assert '\x1b[2J' in focused and '优先级' in plain(focused), '恢复焦点应清屏并完整重绘'
+        pending = screen(b'\x1b[O\x1b[I', raw=True, duration=0.15)
+        assert '\x1b[2J' not in pending, '恢复焦点不能立即清屏'
+        focused = screen(raw=True, duration=0.5)
+        assert '\x1b[2J' in focused and '优先级' in plain(focused), '恢复焦点 300ms 后应清屏并完整重绘'
+        pending = screen(b'\x1b[I', raw=True, duration=0.1)
+        cancelled = screen(b'\x1b[O', raw=True, duration=0.5)
+        assert '\x1b[2J' not in pending + cancelled, '再次失焦应取消待执行重绘'
         # 同尺寸 SIGWINCH 不会触发 Ratatui autoresize，也必须重绘。
         os.kill(process.pid, signal.SIGWINCH)
         assert '\x1b[2J' in screen(raw=True), '同尺寸窗口恢复应重绘'
@@ -145,6 +160,17 @@ with tempfile.TemporaryDirectory(prefix='中文检查 ', dir=ROOT / '.local') as
         editor_return = screen(b'O', raw=True)
         assert 'EDITOR_SENTINEL' in editor_return, '应使用 VISUAL 指定的编辑器'
         assert '\x1b[2J' in editor_return and '优先级' in plain(editor_return), '编辑器返回后应完整重绘'
+        screen(b'x')
+        assert '检查中文保存' in screen(b'H'), 'H 显示完成但未归档的任务'
+        assert '暂无已完成任务' in screen(b'a'), 'a 只显示归档，不自动归档'
+        screen(b'a')
+        screen(b'A')
+        assert '检查中文保存' in (data / 'done.txt').read_text()
+        assert '检查中文保存' in screen(b'a'), 'A 后 a 应读取同目录的 done.txt'
+        screen(b'x')  # 归档视图中恢复任务。
+        screen(b'a')
+        assert '检查中文保存' in (data / 'todo.txt').read_text()
+        assert (data / 'config/todot/config.toml').is_file(), '设置也应使用默认数据根目录'
         assert '新建任务' in screen(b'n')
         screen('交互录入中文'.encode())
         refreshed = screen(b'\x0c', raw=True)
@@ -192,30 +218,27 @@ with tempfile.TemporaryDirectory(prefix='中文检查 ', dir=ROOT / '.local') as
     run('--force', 'del', '1')
     assert not (data / 'notes' / note_rel).exists(), 'CLI 删除也必须清理正文'
 
-    # 首次启动自动复制旧项目数据；目标已存在时不得覆盖或重复导入。
-    legacy = Path(temp) / '旧项目'
-    (legacy / '.local/bin').mkdir(parents=True)
-    for name in ['start.sh', 'migrate-data.sh']:
-        shutil.copy2(ROOT / name, legacy / name)
-    shutil.copy2(BINARY, legacy / '.local/bin/tuxedo')
-    (legacy / 'notes').mkdir()
-    (legacy / '.config/tuxedo').mkdir(parents=True)
+    # 显式 cp 迁移旧数据；目标已存在时不得覆盖或重复导入。
+    legacy = Path(temp) / '旧数据'
+    (legacy / 'notes').mkdir(parents=True)
+    (legacy / 'config/tuxedo').mkdir(parents=True)
     originals = {'todo.txt': '旧任务 note:旧正文.md\n', 'done.txt': 'x 已完成\n',
                  'inbox.txt': '收件箱\n', 'notes/旧正文.md': '# 正文\n',
-                 '.config/tuxedo/config.toml': 'theme = Dawn\n'}
+                 'inbox.txt.tuxedo-staging': '恢复收件箱\n',
+                 'config/tuxedo/config.toml': 'theme = Dawn\n'}
     for name, content in originals.items():
         (legacy / name).write_text(content)
     migrated = Path(temp) / '迁移目录'
-    migration_env = dict(env, TODO_TUI_HOME=str(migrated))
-    result = subprocess.run([str(legacy / 'start.sh'), '--json', 'list'], env=migration_env,
+    migration_env = dict(env, TODO_DIR=str(migrated))
+    result = subprocess.run([str(ROOT / 'migrate-data.sh'), str(legacy), str(migrated)], env=migration_env,
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
     for name, content in originals.items():
         assert (legacy / name).read_text() == content
-        target = name.replace('.config/', 'config/')
+        target = name.replace('config/tuxedo/', 'config/todot/').replace('.tuxedo-staging', '.todot-staging')
         assert (migrated / target).read_text() == content
     (legacy / 'todo.txt').write_text('不会重复导入\n')
-    result = subprocess.run([str(legacy / 'migrate-data.sh')], env=migration_env,
+    result = subprocess.run([str(ROOT / 'migrate-data.sh'), str(legacy), str(migrated)], env=migration_env,
                             capture_output=True, text=True, timeout=10)
     assert result.returncode != 0 and '未覆盖' in result.stderr
     assert (migrated / 'todo.txt').read_text() == originals['todo.txt']

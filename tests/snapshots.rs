@@ -20,14 +20,14 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier};
 
-use tuxedo::app::{
+use todot::app::{
     App, BuilderField, CalendarState, CalendarTarget, Density, DraftOverlay, Mode,
     PriorityChooserState, RecurrenceBuilderState, SlashMenuState, View,
 };
-use tuxedo::config::Config;
-use tuxedo::recurrence::RecUnit;
-use tuxedo::sample;
-use tuxedo::ui;
+use todot::config::Config;
+use todot::recurrence::RecUnit;
+use todot::sample;
+use todot::ui;
 
 const COLS: u16 = 100;
 const ROWS: u16 = 32;
@@ -35,13 +35,13 @@ const ROWS: u16 = 32;
 /// File path used in every fixture. Hard-coded (not `temp_dir()`) so the
 /// header line that displays it stays byte-identical across runs and
 /// machines. The file is never actually written; `App::new` only stores it.
-const FIXTURE_PATH: &str = "/tmp/tuxedo-snapshot.txt";
+const FIXTURE_PATH: &str = "/tmp/todot-snapshot.txt";
 
 /// Config-file path for the settings-overlay fixture. Hard-coded for the
 /// same reason as `FIXTURE_PATH`: `Config::path()` resolves `$HOME` at
 /// runtime, which would otherwise bake the author's home directory into
 /// the snapshot and break on any other machine (CI included).
-const FIXTURE_CONFIG_PATH: &str = "/tmp/tuxedo-snapshot.toml";
+const FIXTURE_CONFIG_PATH: &str = "/tmp/todot-snapshot.toml";
 
 fn make_app() -> App {
     // Seed the fixture file on disk so any snapshot test that exercises a
@@ -252,7 +252,7 @@ fn mobile_panels_stack_and_keep_list_visible_after_resize() {
         Config::default(),
     );
     app.prefs.density = Density::Compact;
-    while app.prefs.sort != tuxedo::app::Sort::File {
+    while app.prefs.sort != todot::app::Sort::File {
         app.cycle_sort();
     }
     app.cursor = 40;
@@ -319,11 +319,11 @@ fn mobile_filter_picker_keeps_active_chip_visible() {
     assert!(line.contains("▸@context-14"), "{line}");
 
     app.saved_filters = vec![
-        tuxedo::app::SavedFilter {
+        todot::app::SavedFilter {
             name: "first".into(),
             query: "task".into(),
         },
-        tuxedo::app::SavedFilter {
+        todot::app::SavedFilter {
             name: "second".into(),
             query: "task".into(),
         },
@@ -358,7 +358,7 @@ fn mobile_empty_filters_do_not_reserve_rows_and_status_stays_short() {
         status.contains("1项") && status.contains("Enter详情"),
         "{status}"
     );
-    assert!(!status.contains("tuxedo") && !status.contains("2026"));
+    assert!(!status.contains("todot") && !status.contains("2026"));
     app.flash("short flash");
     assert_eq!(
         render_text(&app, 40, 30)
@@ -523,7 +523,29 @@ fn archive_view() {
 fn help_overlay() {
     let mut app = make_app();
     app.mode = Mode::Help;
+    let text = buffer_to_text(&render(&app));
+    assert!(text.contains("Ctrl+L"));
+    assert!(text.replace(' ', "").contains("重测／重绘（保留输入）"));
     snapshot_app("help_overlay", &app);
+}
+
+#[test]
+fn theme_picker_slots_and_mobile_selection_are_visible() {
+    let mut app = make_app();
+    app.enter_pick_theme();
+    app.pick_theme_slot_step(true);
+    let text = render_text(&app, 40, 16).replace(' ', "");
+    assert!(text.contains("固定／回退"));
+    assert!(text.contains("深色"));
+    assert!(text.contains("浅色"));
+    assert!(text.contains("Ctrl+L"));
+    app.prefs
+        .set_slot_theme(app.theme_pick_slot, todot::theme::all().len() - 1);
+    assert!(
+        render_text(&app, 40, 16).contains("Terminal"),
+        "last theme remains visible in a short picker"
+    );
+    snapshot_app("theme_picker", &app);
 }
 
 #[test]
@@ -566,11 +588,15 @@ fn command_palette_preserves_visual_selection() {
 
 #[test]
 fn body_preview_tracks_cursor_and_body_editor_keeps_tail_visible() {
-    let dir = std::env::temp_dir().join(format!("tuxedo-body-view-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("todot-body-view-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("alpha.md"), "# BODY_ALPHA\n  +plain @plain\n").unwrap();
-    std::fs::write(dir.join("beta.md"), "# BODY_BETA\n").unwrap();
+    std::fs::write(
+        dir.join("beta.md"),
+        format!("# BODY_BETA\n{}BODY_BETA_END", "正文内容\n".repeat(60)),
+    )
+    .unwrap();
     let mut app = App::new(
         dir.join("todo.txt"),
         "Alpha note:alpha.md\nBeta note:beta.md\n".into(),
@@ -580,7 +606,33 @@ fn body_preview_tracks_cursor_and_body_editor_keeps_tail_visible() {
             ..Config::default()
         },
     );
+    let assert_body_order = |text: &str, content: &str| {
+        let lines: Vec<_> = text.lines().collect();
+        let raw = lines
+            .iter()
+            .position(|line| line.replace(' ', "").contains("原始记录"))
+            .unwrap();
+        let body = lines
+            .iter()
+            .position(|line| line.trim_matches('│').replace(' ', "") == "正文")
+            .unwrap();
+        assert!(raw < body, "body must follow the raw record");
+        assert!(lines[raw + 2].contains("Alpha") || lines[raw + 2].contains("Beta"));
+        assert!(lines[body + 1].trim_matches([' ', '│']).is_empty());
+        assert!(lines[body + 2].contains(content));
+        assert!(
+            lines[..raw]
+                .iter()
+                .any(|line| line.replace(' ', "").contains("优先级"))
+        );
+    };
     let first = render_text(&app, 120, 32);
+    let sidebar = first
+        .lines()
+        .map(|line| line.chars().skip(86).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_body_order(&sidebar, "BODY_ALPHA");
     assert!(first.contains("BODY_ALPHA"));
     assert!(!first.contains("BODY_BETA"));
     let center = first
@@ -604,21 +656,20 @@ fn body_preview_tracks_cursor_and_body_editor_keeps_tail_visible() {
         !detail.contains("note:"),
         "detail must display content, not internal links"
     );
-    let modal_top = (31 - 27) / 2;
-    assert!(
-        detail
-            .lines()
-            .skip(modal_top)
-            .take(6)
-            .any(|line| line.contains("BODY_BETA")),
-        "body must be visible before metadata without scrolling"
-    );
+    let popup = detail
+        .lines()
+        .map(|line| line.chars().skip(11).take(98).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_body_order(&popup, "BODY_BETA");
+    app.detail_scroll.set(u16::MAX);
+    assert!(render_text(&app, 120, 32).contains("BODY_BETA_END"));
     app.mode = Mode::Insert;
     app.body.focused = true;
     app.draft_set_insert("正文滚动测试".into());
     app.body.draft.set(
         format!("{}中文尾部 BODY_TAIL", "第一行\n".repeat(50)),
-        tuxedo::app::DialogInputMode::Insert,
+        todot::app::DialogInputMode::Insert,
     );
     let text = render_text(&app, 40, 16);
     assert!(text.contains("BODY_TAIL"), "{text}");
@@ -655,7 +706,7 @@ fn insert_dialog_after_nl_parse() {
     // runs after as a contract check on AddOutcome::Parsed — a regression
     // either way will fail the test.
     snapshot_app("insert_dialog_after_nl_parse", &app);
-    assert_eq!(outcome, tuxedo::app::AddOutcome::Parsed);
+    assert_eq!(outcome, todot::app::AddOutcome::Parsed);
 }
 
 #[test]
@@ -790,7 +841,7 @@ fn list_scrolls_to_keep_cursor_visible_when_below_fold() {
     app.prefs.layout.right = false;
     // Switch to file-order sort so rows render flat (no priority/due groups
     // injecting extra header lines into the line-index math).
-    while app.prefs.sort != tuxedo::app::Sort::File {
+    while app.prefs.sort != todot::app::Sort::File {
         app.cycle_sort();
     }
 

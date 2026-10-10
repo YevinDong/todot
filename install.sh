@@ -50,16 +50,24 @@ if ! "$CARGO_HOME/bin/rustup" run "$RUST_VERSION" rustc --version >/dev/null 2>&
     "$CARGO_HOME/bin/rustup" toolchain install "$RUST_VERSION" --profile minimal
 fi
 
-printf '从当前仓库源码编译中文 Tuxedo；首次需要下载依赖。\n'
+printf '从当前仓库源码编译 todot；首次需要下载依赖。\n'
 "$CARGO_HOME/bin/cargo" "+$RUST_VERSION" build --release --locked \
     --manifest-path "$ROOT/Cargo.toml" --target-dir "$CACHE/target"
 if (( RUN_TESTS )); then
     env -u TODO_DIR -u TODO_FILE -u DONE_FILE -u NOTES_DIR \
-        XDG_CONFIG_HOME="$CACHE/test-config" TUXEDO_NO_UPDATE_CHECK=1 \
+        XDG_CONFIG_HOME="$CACHE/test-config" \
         "$CARGO_HOME/bin/cargo" "+$RUST_VERSION" test --locked \
         --manifest-path "$ROOT/Cargo.toml" --target-dir "$CACHE/target" -- --test-threads=1
 fi
-cp -- "$CACHE/target/release/tuxedo" "$CACHE/bin/tuxedo.new"
-chmod +x "$CACHE/bin/tuxedo.new"
-mv -f -- "$CACHE/bin/tuxedo.new" "$CACHE/bin/tuxedo"
-printf '安装完成。运行 %s/start.sh。\n' "$ROOT"
+cp -- "$CACHE/target/release/todot" "$CACHE/bin/todot.new"
+chmod +x "$CACHE/bin/todot.new"
+mv -f -- "$CACHE/bin/todot.new" "$CACHE/bin/todot"
+INSTALL_DIR=${INSTALL_DIR:-${HOME:?HOME 未设置}/.local/bin}
+mkdir -p -- "$INSTALL_DIR"
+install -m 755 -- "$CACHE/bin/todot" "$INSTALL_DIR/todot.new"
+mv -f -- "$INSTALL_DIR/todot.new" "$INSTALL_DIR/todot"
+printf '安装完成：%s/todot。直接运行 todot。\n' "$INSTALL_DIR"
+case ":$PATH:" in
+    *":$INSTALL_DIR:"*) ;;
+    *) printf '请将此行加入 shell 配置：export PATH="%s:$PATH"\n' "$INSTALL_DIR" ;;
+esac

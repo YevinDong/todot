@@ -78,7 +78,7 @@ pub fn run(argv: &[String]) -> Result<Option<i32>> {
     let args = match parse_args(&rest) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("tuxedo: {e}");
+            eprintln!("todot: {e}");
             return Ok(Some(2));
         }
     };
@@ -115,7 +115,7 @@ pub fn run(argv: &[String]) -> Result<Option<i32>> {
         "listproj" | "lsprj" => cmd_listtags(&store, json, TagKind::Project),
         "listcon" | "lsc" => cmd_listtags(&store, json, TagKind::Context),
         other => {
-            eprintln!("tuxedo：未知命令：{other}");
+            eprintln!("todot：未知命令：{other}");
             2
         }
     };
@@ -125,12 +125,12 @@ pub fn run(argv: &[String]) -> Result<Option<i32>> {
 // ----- helpers -----------------------------------------------------------
 
 fn err(msg: impl std::fmt::Display) -> i32 {
-    eprintln!("tuxedo: {msg}");
+    eprintln!("todot: {msg}");
     1
 }
 
 fn usage(msg: impl std::fmt::Display) -> i32 {
-    eprintln!("用法：tuxedo {msg}");
+    eprintln!("用法：todot {msg}");
     2
 }
 
@@ -174,7 +174,7 @@ fn store_error(json: bool, action: &str, e: impl std::fmt::Display) -> i32 {
         s.push('}');
         eprintln!("{s}");
     } else {
-        eprintln!("tuxedo: {e}");
+        eprintln!("todot: {e}");
     }
     1
 }
@@ -389,7 +389,7 @@ fn cmd_done(store: &mut Store, pos: &[String], json: bool) -> i32 {
             // todo.sh format for the completion itself.
             println!("{n} {}", t.raw);
             println!("{prefix}：任务 {n} 已完成。");
-            // Recurrence is a tuxedo feature todo.sh lacks; surface the spawned
+            // Recurrence is a todot feature todo.sh lacks; surface the spawned
             // next instance as a freshly-added task in the same idiom.
             if let Some((nn, nt)) = next {
                 println!("{nn} {}", nt.raw);

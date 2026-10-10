@@ -4,6 +4,38 @@ use std::sync::OnceLock;
 
 use ratatui::style::Color;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorMode {
+    Dark,
+    Light,
+}
+
+impl ColorMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Dark => "深色",
+            Self::Light => "浅色",
+        }
+    }
+
+    pub fn from_background(r: u16, g: u16, b: u16) -> Self {
+        let linear = |c: u16| {
+            let c = f64::from(c) / 65535.0;
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        // ponytail: default-background luminance is a heuristic; prefer semantic CSI replies.
+        if 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b) > 0.179 {
+            Self::Light
+        } else {
+            Self::Dark
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
     pub name: &'static str,
@@ -223,10 +255,10 @@ pub fn all() -> &'static [&'static Theme] {
     REGISTRY.get_or_init(|| BUILT_IN.to_vec()).as_slice()
 }
 
-/// Resolve `${XDG_CONFIG_HOME:-$HOME/.config}/tuxedo/themes`. Returns None
+/// Resolve `<data root>/config/todot/themes`, honoring XDG_CONFIG_HOME. Returns None
 /// only when neither XDG_CONFIG_HOME nor HOME is set.
 pub fn themes_dir() -> Option<PathBuf> {
-    Some(crate::xdg::config_home()?.join("tuxedo").join("themes"))
+    Some(crate::xdg::config_home()?.join("todot").join("themes"))
 }
 
 /// Read every `*.toml` file in `dir`, parse it as a theme, and return the
@@ -528,7 +560,7 @@ matched = #b58900
 
     fn unique_dir(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "tuxedo-themes-{label}-{}-{:?}",
+            "todot-themes-{label}-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ))

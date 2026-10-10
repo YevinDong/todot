@@ -10,15 +10,18 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, Ke
 
 use std::io::Write;
 
-use tuxedo::action::{Action, RecAction};
-use tuxedo::app::{AddOutcome, App, CalendarTarget, DialogInputMode, Mode, OverlayKind, View};
-use tuxedo::cli;
-use tuxedo::config::Config;
-use tuxedo::config_watcher;
-use tuxedo::keybinds::{KeyBindings, ResolvedKey};
-use tuxedo::theme;
-use tuxedo::ui::hyperlinks;
-use tuxedo::{clipboard, todo, ui, update};
+use todot::action::{Action, RecAction};
+use todot::app::{AddOutcome, App, CalendarTarget, DialogInputMode, Mode, OverlayKind, View};
+use todot::cli;
+use todot::config::Config;
+use todot::config_watcher;
+use todot::keybinds::{KeyBindings, ResolvedKey};
+use todot::theme;
+use todot::ui::hyperlinks;
+use todot::{clipboard, todo, ui, update};
+
+mod terminal_theme;
+use terminal_theme::ThemeProbe;
 
 const EVENT_POLL: Duration = Duration::from_millis(250);
 
@@ -26,22 +29,17 @@ fn main() -> Result<()> {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     // A recognized subcommand (possibly preceded by `-f`/`--json`) runs the
     // one-shot CLI and exits; otherwise we fall through to the TUI.
-    if let Some(code) = tuxedo::cmd::run(&argv)? {
+    if let Some(code) = todot::cmd::run(&argv)? {
         std::process::exit(code);
     }
     let arg = argv.first().cloned();
-    // `start_mode` is `Welcome` only on a true first run (no target and no
-    // ./todo.txt); every other entry opens straight into Normal.
     let (path, start_mode) = match arg.as_deref() {
         Some("--help") | Some("-h") => {
             print_usage();
             return Ok(());
         }
         Some("--version") | Some("-V") => {
-            println!(
-                "tuxedo {}（todo-tui 中文定制版）",
-                env!("CARGO_PKG_VERSION")
-            );
+            println!("todot {}（中文定制版）", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
         Some("update") => {
@@ -50,16 +48,11 @@ fn main() -> Result<()> {
         }
         Some("--sample") => (cli::sample_path()?, Mode::Normal),
         Some(s) if s.starts_with('-') => {
-            eprintln!("tuxedo：未知选项：{s}");
-            eprintln!("请运行 tuxedo --help 查看帮助");
+            eprintln!("todot：未知选项：{s}");
+            eprintln!("请运行 todot --help 查看帮助");
             std::process::exit(2);
         }
-        _ => match cli::resolve_target(arg)? {
-            cli::Target::File(p) => (p, Mode::Normal),
-            // Open into the welcome prompt backed by an as-yet-uncreated
-            // ./todo.txt; `handle_welcome` materializes the file the user picks.
-            cli::Target::FirstRun => (std::path::PathBuf::from("todo.txt"), Mode::Welcome),
-        },
+        _ => (cli::resolve_path(arg)?, Mode::Normal),
     };
     // A freshly-created file is empty; otherwise read it. We accept NotFound
     // (race with deletion between resolve_path and now) as "empty file" but
@@ -106,12 +99,9 @@ fn main() -> Result<()> {
         1 => app_state.flash(theme_warnings.into_iter().next().expect("len==1")),
         n => app_state.flash(format!("已跳过 {n} 个主题，请检查主题配置目录")),
     }
-    if std::env::var_os("TUXEDO_NO_UPDATE_CHECK").is_none() {
-        app_state.set_update_check(update::spawn_check());
-    }
 
     let terminal = ratatui::init();
-    // Give the window/tab a consistent `tuxedo <path>` title across terminals
+    // Give the window/tab a consistent `todot <path>` title across terminals
     // and operating systems, shortening long paths to fit a fixed budget.
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     let title = ui::title::terminal_title(&path, home.as_deref(), ui::title::DEFAULT_BUDGET);
@@ -124,7 +114,7 @@ fn main() -> Result<()> {
     );
     ratatui::restore();
     // Clear the title on exit so the shell retitles on its next prompt rather
-    // than leaving `tuxedo …` behind.
+    // than leaving `todot …` behind.
     let _ = crossterm::execute!(io::stdout(), crossterm::terminal::SetTitle(""));
     // Print the file path *after* restoring the terminal so the message
     // survives in the user's scrollback rather than being eaten by the
@@ -132,18 +122,17 @@ fn main() -> Result<()> {
     // rebound to the sample. Skip the line if the user quit the welcome
     // prompt without choosing — no file was opened.
     if app_state.mode != Mode::Welcome {
-        eprintln!("tuxedo: {}", app_state.file_path.display());
+        eprintln!("todot: {}", app_state.file_path.display());
     }
     result
 }
 
 fn print_usage() {
-    println!("用法：tuxedo [FILE]                 打开终端界面");
-    println!("      tuxedo <command> [args]       执行命令");
-    println!("       tuxedo update");
+    println!("用法：todot [FILE]                 打开终端界面");
+    println!("      todot <command> [args]       执行命令");
+    println!("       todot update");
     println!();
-    println!("未指定文件或命令时，优先打开当前目录的 todo.txt；");
-    println!("否则提示创建 todo.txt 或打开示例。");
+    println!("未指定路径时，使用 ~/.todot/todo.txt；不存在则创建空文件。");
     println!("界面默认使用中文。");
     println!();
     println!("在界面内按 s，可启动局域网手机录入服务并显示二维码。");
@@ -172,7 +161,7 @@ fn print_usage() {
     println!("      --json       输出供脚本使用的 JSON");
     println!("  -h, --help       显示帮助");
     println!("  -V, --version    显示版本");
-    println!("      --sample     打开示例（本项目启动脚本不使用此选项）");
+    println!("      --sample     打开示例");
     println!();
     println!("环境变量：");
     println!("  TODO_DIR     待办及归档所在目录");
@@ -192,7 +181,25 @@ fn run(
         event::EnableBracketedPaste
     )?;
     let mut dirty = true;
+    let mut focus_redraw_at: Option<Instant> = None;
+    let mut theme_probe = ThemeProbe::default();
+    let mut followed_terminal = false;
     while !app.should_quit {
+        if app.mode != Mode::PickTheme && app.prefs.themes.auto != followed_terminal {
+            followed_terminal = app.prefs.themes.auto;
+            if followed_terminal {
+                theme_probe.start(app, &mut io::stdout(), Instant::now(), false);
+                dirty = true;
+            }
+        }
+        if theme_probe.tick(app, &mut io::stdout(), Instant::now()) {
+            dirty = true;
+        }
+        if focus_redraw_at.is_some_and(|deadline| Instant::now() >= deadline) {
+            terminal.clear()?;
+            dirty = true;
+            focus_redraw_at = None;
+        }
         // Pick up midnight rollover so threshold-hidden tasks reveal
         // themselves without requiring an app restart.
         if app.refresh_today(chrono::Local::now().format("%Y-%m-%d").to_string()) {
@@ -233,19 +240,28 @@ fn run(
             }
             dirty = false;
         }
-        let timeout = next_timeout(app);
+        let timeout = next_timeout(app, focus_redraw_at, theme_probe.deadline());
         if event::poll(timeout)? {
-            match event::read()? {
+            let input = event::read()?;
+            if theme_probe.handle(app, &input) {
+                dirty = true;
+                continue;
+            }
+            match input {
                 Event::Key(key)
                     if key.kind == KeyEventKind::Press
                         && key.code == KeyCode::Char('l')
                         && key.modifiers == KeyModifiers::CONTROL =>
                 {
+                    theme_probe.start(app, &mut io::stdout(), Instant::now(), true);
                     terminal.clear()?;
                     dirty = true;
                 }
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     handle_key(app, key, keybinds);
+                    if app.mode == Mode::PickTheme && app.theme_detection_status == "未检测" {
+                        theme_probe.start(app, &mut io::stdout(), Instant::now(), false);
+                    }
                     if let Some(path) = app.take_pending_editor_path() {
                         if let Err(e) = open_path_in_editor(&path) {
                             app.flash(format!("{e:#}"));
@@ -259,10 +275,15 @@ fn run(
                     dirty = true;
                 }
                 // 终端恢复后，即便尺寸相同，旧差量缓存也可能不再对应实际画面。
-                Event::Resize(_, _) | Event::FocusGained => {
+                Event::Resize(_, _) => {
                     terminal.clear()?;
                     dirty = true;
                 }
+                // 留出 300ms 等终端恢复画面，期间仍正常处理输入。
+                Event::FocusGained => {
+                    focus_redraw_at = Some(Instant::now() + Duration::from_millis(300));
+                }
+                Event::FocusLost => focus_redraw_at = None,
                 _ => {}
             }
         } else if !app.check_external_changes() {
@@ -360,11 +381,20 @@ fn run_editor(
     anyhow::bail!("找不到可用编辑器，请安装 nvim、vim 或 vi，或设置 VISUAL / EDITOR")
 }
 
-fn next_timeout(app: &App) -> Duration {
-    let earliest = match (app.flash_deadline(), app.chord.deadline()) {
-        (Some(f), Some(c)) => Some(f.min(c)),
-        (a, b) => a.or(b),
-    };
+fn next_timeout(
+    app: &App,
+    focus_redraw_at: Option<Instant>,
+    theme_deadline: Option<Instant>,
+) -> Duration {
+    let earliest = [
+        app.flash_deadline(),
+        app.chord.deadline(),
+        focus_redraw_at,
+        theme_deadline,
+    ]
+    .into_iter()
+    .flatten()
+    .min();
     match earliest {
         Some(deadline) => deadline
             .saturating_duration_since(Instant::now())
@@ -499,7 +529,7 @@ impl EditAction {
         self.apply_draft(&mut app.draft)
     }
 
-    fn apply_draft(self, draft: &mut tuxedo::app::DraftState) -> DraftEffect {
+    fn apply_draft(self, draft: &mut todot::app::DraftState) -> DraftEffect {
         let effect = match self {
             Self::Insert(_)
             | Self::DeleteBackward
@@ -942,7 +972,7 @@ fn handle_settings(app: &mut App, key: KeyEvent) {
 
     match key.code {
         KeyCode::Esc | KeyCode::Char(',') => app.mode = Mode::Normal,
-        KeyCode::Char('T') => apply_action(app, Action::CycleTheme),
+        KeyCode::Char('T') => apply_action(app, Action::OpenThemePicker),
         KeyCode::Char('D') => apply_action(app, Action::CycleDensity),
         KeyCode::Char('L') => apply_action(app, Action::ToggleLineNum),
         KeyCode::Char('[') => apply_action(app, Action::ToggleLeftPane),
@@ -973,6 +1003,9 @@ fn handle_pick_theme(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('j') | KeyCode::Down | KeyCode::Char('T') => app.pick_theme_step(true),
         KeyCode::Char('k') | KeyCode::Up => app.pick_theme_step(false),
+        KeyCode::Tab => app.pick_theme_slot_step(true),
+        KeyCode::BackTab => app.pick_theme_slot_step(false),
+        KeyCode::Char('m') => app.pick_theme_toggle_auto(),
         KeyCode::Enter => app.pick_theme_accept(),
         KeyCode::Esc => app.pick_theme_cancel(),
         _ => {}
@@ -1095,7 +1128,7 @@ fn handle_prompt(app: &mut App, key: KeyEvent) {
     }
 }
 
-// `Action` lives in `tuxedo::action` (see `src/action.rs`). Keeping it in the
+// `Action` lives in `todot::action` (see `src/action.rs`). Keeping it in the
 // library lets the command palette enumerate every variant without pulling
 // main.rs into the dependency graph.
 
@@ -1510,12 +1543,12 @@ mod tests {
     use super::*;
     use chrono::NaiveDate;
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use tuxedo::app::Sort;
-    use tuxedo::config::Config;
+    use todot::app::Sort;
+    use todot::config::Config;
 
     #[test]
     fn body_input_paste_and_failed_save_keep_draft_open() {
-        let dir = std::env::temp_dir().join(format!("tuxedo-body-input-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("todot-body-input-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("test directory");
         let path = dir.join("todo.txt");
@@ -1597,7 +1630,7 @@ mod tests {
     #[test]
     fn editor_falls_back_only_when_executable_is_missing() {
         let file = std::path::Path::new("笔记 路径.md");
-        let missing = "/nonexistent/tuxedo-editor";
+        let missing = "/nonexistent/todot-editor";
         assert!(run_editor(file, [missing, "/bin/true", "/bin/false"]).is_ok());
         assert!(run_editor(file, [missing, missing]).is_err());
         assert!(run_editor(file, ["/bin/false", "/bin/true"]).is_err());
@@ -1626,7 +1659,7 @@ mod tests {
 
     fn welcome_app(name: &str) -> (App, std::path::PathBuf) {
         let path = std::env::temp_dir().join(format!(
-            "tuxedo-welcome-{name}-{}-{:?}.txt",
+            "todot-welcome-{name}-{}-{:?}.txt",
             std::process::id(),
             std::thread::current().id()
         ));
@@ -1660,7 +1693,7 @@ mod tests {
         assert_eq!(app.mode, Mode::Normal);
         assert_ne!(app.file_path, path, "`s` rebinds away from the cwd target");
         assert!(
-            app.file_path.ends_with("tuxedo-sample.txt"),
+            app.file_path.ends_with("todot-sample.txt"),
             "`s` opens the bundled sample, got {:?}",
             app.file_path
         );
@@ -1686,18 +1719,14 @@ mod tests {
         let mut app = build_app();
         app.mode = Mode::Settings;
 
-        let theme_before = app.prefs.theme_idx();
         handle_settings(&mut app, key('T'));
-        assert_ne!(
-            app.prefs.theme_idx(),
-            theme_before,
-            "`T` must cycle the theme, per the settings screen's own hint"
-        );
         assert_eq!(
             app.mode,
-            Mode::Settings,
-            "adjusting a setting must not close the dialog"
+            Mode::PickTheme,
+            "T opens the same picker from settings"
         );
+        handle_pick_theme(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.mode, Mode::Settings, "cancel returns to settings");
 
         let show_done_before = app.prefs.show_done;
         handle_settings(&mut app, key('H'));
@@ -1765,7 +1794,7 @@ mod tests {
 
     fn build_app() -> App {
         let path = std::env::temp_dir().join(format!(
-            "tuxedo-bindings-{}-{:?}.txt",
+            "todot-bindings-{}-{:?}.txt",
             std::process::id(),
             std::thread::current().id()
         ));
@@ -1836,7 +1865,7 @@ mod tests {
 
     fn build_app_with_due() -> App {
         let path = std::env::temp_dir().join(format!(
-            "tuxedo-bindings-{}-{:?}.txt",
+            "todot-bindings-{}-{:?}.txt",
             std::process::id(),
             std::thread::current().id()
         ));
@@ -2227,8 +2256,7 @@ mod tests {
         use std::time::{Duration, Instant};
         static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir =
-            std::env::temp_dir().join(format!("tuxedo-bindings-{}-{}", std::process::id(), n));
+        let dir = std::env::temp_dir().join(format!("todot-bindings-{}-{}", std::process::id(), n));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create test dir");
         let todo_path = dir.join("todo.txt");
@@ -2393,7 +2421,7 @@ mod tests {
 
     #[test]
     fn rec_builder_hl_changes_value_and_jk_moves_focus() {
-        use tuxedo::app::BuilderField;
+        use todot::app::BuilderField;
 
         fn code(c: KeyCode) -> KeyEvent {
             KeyEvent::new(c, KeyModifiers::NONE)
@@ -2448,7 +2476,7 @@ mod tests {
 
     #[test]
     fn rec_builder_custom_binding_wins_over_builtin() {
-        use tuxedo::app::BuilderField;
+        use todot::app::BuilderField;
 
         // `[recurrence]` swaps the built-in meaning of `l`: it should move
         // focus rather than change the value, proving custom bindings are

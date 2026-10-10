@@ -1,10 +1,10 @@
 [package]
-name = "tuxedo"
+name = "todot"
 version = "2026.8.1"
 edition = "2024"
-description = "A Chinese-localized Tuxedo fork with reproducible Linux builds"
+description = "A Chinese todo.txt terminal app with reproducible Linux builds"
 license = "MIT"
-repository = "https://github.com/YevinDong/todo-tui"
+repository = "https://github.com/YevinDong/todot"
 publish = false
 
 [dependencies]
@@ -16,6 +16,10 @@ notify = "8"
 qrcode = { version = "0.14", default-features = false }
 ratatui = { version = "0.30.0", features = ["unstable-rendered-line-info"] }
 tiny_http = "0.12"
+
+# Keep terminal replies in the same input parser as keyboard/paste events.
+[patch.crates-io]
+crossterm = { path = "vendor/crossterm" }
 
 [dev-dependencies]
 insta = "1.47"

@@ -550,10 +550,10 @@ mod tests {
 
         let raw = &app.tasks()[0].raw;
         assert!(
-            raw.contains("note:projects/tuxedo-tasks/write-pr-summary.md"),
+            raw.contains("note:projects/todot-tasks/write-pr-summary.md"),
             "task should get stable generated note token: {raw}"
         );
-        let expected = dir.join("projects/tuxedo-tasks/write-pr-summary.md");
+        let expected = dir.join("projects/todot-tasks/write-pr-summary.md");
         assert_eq!(app.take_pending_editor_path(), Some(expected.clone()));
         let body = std::fs::read_to_string(expected).expect("created note exists");
         assert!(body.starts_with("# Write PR summary\n"));

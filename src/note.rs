@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::todo::{self, Task};
 
-pub const DEFAULT_NOTES_SUBDIR: &str = "projects/tuxedo-tasks";
+pub const DEFAULT_NOTES_SUBDIR: &str = "projects/todot-tasks";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoteTarget {
@@ -18,8 +18,8 @@ pub fn notes_dir_from_config(configured: Option<&str>) -> PathBuf {
     if let Some(value) = configured.map(str::trim).filter(|s| !s.is_empty()) {
         return expand_note_dir(value);
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        return PathBuf::from(home).join("notes");
+    if let Ok(data) = crate::cli::data_dir() {
+        return data.join("notes");
     }
     PathBuf::from("notes")
 }
@@ -288,12 +288,12 @@ mod tests {
 
         assert_eq!(
             target.rel,
-            "projects/tuxedo-tasks/reformular-relatorio-diario-eventos-para-slack.md"
+            "projects/todot-tasks/reformular-relatorio-diario-eventos-para-slack.md"
         );
         assert_eq!(
             target.path,
             PathBuf::from(
-                "/home/me/notes/projects/tuxedo-tasks/reformular-relatorio-diario-eventos-para-slack.md"
+                "/home/me/notes/projects/todot-tasks/reformular-relatorio-diario-eventos-para-slack.md"
             )
         );
         assert!(!target.existed_in_task);

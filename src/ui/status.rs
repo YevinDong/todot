@@ -58,6 +58,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         Mode::PromptSaveFilter => "输入筛选名称 · Enter 保存 · Esc 取消",
         Mode::CommandPalette => "输入以筛选 · Enter 执行 · Esc 取消",
         Mode::Share => "扫描二维码 · 任意键关闭",
+        Mode::PickTheme => "Tab 槽位 · m 模式 · j/k 预览 · Enter 保存 · Esc 取消",
         Mode::Welcome => "c 创建 todo.txt · s 打开示例 · q 退出",
         _ => "j/k 移动 · n 新建 · x 完成 · / 搜索 · ? 帮助 · u 撤销 · q 退出",
     };
@@ -114,7 +115,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // accent color (the rest of the right text is dim).
     let update_suffix = app
         .update_available()
-        .map(|tag| format!(" · ↑ {tag} (tuxedo update)"));
+        .map(|tag| format!(" · ↑ {tag} (todot update)"));
     let right_text = right_parts.join(" · ");
 
     // Append a chord indicator (e.g. " g…") so two-key sequences like gg/dd/fp

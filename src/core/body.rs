@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn deleting_bodies_preserves_completion_sharing_undo_and_failed_writes() {
-        let dir = std::env::temp_dir().join(format!("tuxedo-delete-body-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("todot-delete-body-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("notes")).unwrap();
         let path = dir.join("todo.txt");

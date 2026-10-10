@@ -52,7 +52,26 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         ("  配置文件", Some(config_path)),
         ("", Some("".into())),
         ("显示", None),
-        ("  主题", Some(format!("{} ▾  （T 切换）", theme.name))),
+        (
+            "  主题",
+            Some(format!(
+                "{} · {} （T 设置）",
+                app.prefs.themes.mode_label(),
+                theme.name
+            )),
+        ),
+        (
+            "  深色／浅色主题",
+            Some(format!(
+                "{} / {}",
+                crate::theme::all()[app.prefs.themes.dark].name,
+                crate::theme::all()[app.prefs.themes.light].name
+            )),
+        ),
+        (
+            "  终端模式",
+            Some(format!("{} （Ctrl+L 重测）", app.theme_detection_status)),
+        ),
         ("  行间距", Some(format!("{} ▾  （D 切换）", density))),
         (
             "  行号",

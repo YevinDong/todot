@@ -2,36 +2,45 @@
 set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
-DATA=${TODO_TUI_HOME:-${HOME:?HOME 未设置}/.todo-tui}
-if [[ $DATA != /* ]]; then printf 'TODO_TUI_HOME 必须为绝对路径。\n' >&2; exit 2; fi
+HOME=${HOME:?HOME 未设置}
+SOURCE=${1:-$HOME/.todo-tui}
+DATA=${2:-$HOME/.todot}
+if (( $# > 2 )); then printf '用法：%s [旧目录] [新目录]\n' "$0" >&2; exit 2; fi
+if [[ $# == 0 && ! -d $SOURCE ]]; then SOURCE=$ROOT; fi
+if [[ ! -d $SOURCE || $DATA != /* ]]; then
+    printf '旧目录必须存在，新目录必须为绝对路径。\n' >&2
+    exit 2
+fi
 if [[ -e $DATA || -L $DATA ]]; then
     printf '目标已存在，未覆盖任何数据：%s\n' "$DATA" >&2
     exit 1
 fi
 for exe in /proc/[0-9]*/exe; do
     running=$(readlink -- "$exe" 2>/dev/null || true)
-    if [[ $running == "$ROOT/.local/bin/tuxedo" || $running == "$ROOT/.local/bin/tuxedo (deleted)" ]]; then
-        printf '旧程序仍在运行，请先正常退出，再迁移数据。\n' >&2
-        exit 1
-    fi
+    case "$running" in
+        */tuxedo|*/tuxedo\ \(deleted\)|*/todot|*/todot\ \(deleted\))
+            printf '程序仍在运行，请先正常退出，再迁移数据。\n' >&2; exit 1 ;;
+    esac
 done
-printf '复制后保留项目中的原始数据。\n'
 umask 077
 mkdir -p -- "$(dirname -- "$DATA")"
-STAGING=$(mktemp -d "$(dirname -- "$DATA")/.todo-tui-migrate.XXXXXX")
-trap 'rm -rf -- "$STAGING"' EXIT
-for name in todo.txt done.txt inbox.txt inbox.txt.tuxedo-staging notes .config; do
-    [[ -e $ROOT/$name ]] || continue
+# mkdir fails if another process creates the target; never merge or overwrite.
+mkdir -- "$DATA"
+for name in todo.txt done.txt inbox.txt inbox.txt.tuxedo-staging inbox.txt.todot-staging notes config .config; do
+    [[ -e $SOURCE/$name ]] || continue
     target=$name
     [[ $name != .config ]] || target=config
-    cp -a -- "$ROOT/$name" "$STAGING/$target"
-    diff -qr -- "$ROOT/$name" "$STAGING/$target" >/dev/null
-    printf '已验证：%s\n' "$name"
+    [[ $name != inbox.txt.tuxedo-staging ]] || target=inbox.txt.todot-staging
+    if [[ -e $DATA/$target || -L $DATA/$target ]]; then
+        printf '迁移目标冲突，已复制文件保留，请检查：%s\n' "$DATA/$target" >&2
+        exit 1
+    fi
+    cp -a -- "$SOURCE/$name" "$DATA/$target"
+    diff -qr -- "$SOURCE/$name" "$DATA/$target" >/dev/null
+    printf '已复制并验证：%s\n' "$name"
 done
-chmod -R go-rwx "$STAGING"
-chmod 700 "$STAGING"
-# -T treats DATA as the destination itself; -n never overwrites a concurrent creator.
-mv -Tn -- "$STAGING" "$DATA"
-if [[ -d $STAGING ]]; then printf '目标被其他进程创建，迁移已取消。\n' >&2; exit 1; fi
-trap - EXIT
-printf '迁移完成：%s；旧文件保留，不再由新版读取。\n' "$DATA"
+if [[ -d $DATA/config/tuxedo && ! -e $DATA/config/todot && ! -L $DATA/config/todot ]]; then
+    mv -- "$DATA/config/tuxedo" "$DATA/config/todot"
+fi
+chmod 700 "$DATA"
+printf '迁移完成：%s；旧目录保留。\n' "$DATA"

@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn body_roundtrips_without_parsing_and_failed_saves_preserve_both_files() {
-        let dir = std::env::temp_dir().join(format!("tuxedo-body-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("todot-body-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("todo.txt");

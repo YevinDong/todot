@@ -166,35 +166,14 @@ fn build_lines<'a>(
         return rows;
     };
 
-    match body {
-        Ok(Some(text)) => {
-            rows.push(line_panel(
-                theme,
-                vec![Span::styled(
-                    format!(" {}", crate::todo::body_only(&t.raw)),
-                    Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
-                )],
-            ));
-            rows.push(line_panel(
-                theme,
-                vec![Span::styled(
-                    " 正文",
-                    Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
-                )],
-            ));
-            for line in crate::note::display_text(&text).split('\n') {
-                rows.push(line_panel(theme, vec![Span::raw(format!(" {line}"))]));
-            }
-            rows.push(line_panel(theme, vec![Span::raw(" ")]));
-        }
-        Ok(None) => {}
-        Err(e) => rows.push(line_panel(
+    if matches!(&body, Ok(Some(_))) {
+        rows.push(line_panel(
             theme,
             vec![Span::styled(
-                format!(" 正文读取失败：{e}"),
-                Style::default().fg(theme.overdue),
+                format!(" {}", crate::todo::body_only(&t.raw)),
+                Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
             )],
-        )),
+        ));
     }
     let priority_value = if let Some(p) = t.priority {
         Span::styled(
@@ -317,6 +296,30 @@ fn build_lines<'a>(
             spans.push(style_raw_token(w, t, today, theme, &mut state));
         }
         rows.push(line_panel(theme, spans));
+    }
+    match body {
+        Ok(Some(text)) => {
+            rows.push(line_panel(theme, vec![Span::raw(" ")]));
+            rows.push(line_panel(
+                theme,
+                vec![Span::styled(
+                    " 正文",
+                    Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+                )],
+            ));
+            rows.push(line_panel(theme, vec![Span::raw(" ")]));
+            for line in crate::note::display_text(&text).split('\n') {
+                rows.push(line_panel(theme, vec![Span::raw(format!(" {line}"))]));
+            }
+        }
+        Ok(None) => {}
+        Err(e) => rows.push(line_panel(
+            theme,
+            vec![Span::styled(
+                format!(" 正文读取失败：{e}"),
+                Style::default().fg(theme.overdue),
+            )],
+        )),
     }
     rows
 }

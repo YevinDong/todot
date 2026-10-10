@@ -2,7 +2,7 @@
 source: tests/snapshots.rs
 expression: "render_text(&app, cols, rows)"
 ---
- tuxedo-snap… · 15项  · 优 先 级                                
+ todot-snaps… · 15项  · 优 先 级                                
                                                             
  (2)  优 先 级  A  ────────────────────────────────────────────
   1 ▸ (A) Finish Q2 board deck +work @laptop due:2026-05-06 

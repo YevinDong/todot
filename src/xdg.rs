@@ -1,4 +1,4 @@
-//! XDG Base Directory resolution shared between `config` and `theme` loaders.
+//! Explicit XDG config override, otherwise config under the todot data root.
 
 use std::path::PathBuf;
 
@@ -15,10 +15,9 @@ pub fn config_home() -> Option<PathBuf> {
             return Some(p);
         }
         eprintln!(
-            "tuxedo: ignoring non-absolute XDG_CONFIG_HOME={:?} (per XDG spec)",
+            "todot: ignoring non-absolute XDG_CONFIG_HOME={:?} (per XDG spec)",
             p.display()
         );
     }
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join(".config"))
+    Some(crate::cli::data_dir().ok()?.join("config"))
 }

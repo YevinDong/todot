@@ -1,62 +1,87 @@
-//! Shared CLI helpers used by the TUI entry point and the one-shot CLI
-//! commands. Kept in the library crate so both resolve target paths the same
-//! way. This module is the single place that reads the todo.txt environment
-//! variables (`TODO_FILE`, `TODO_DIR`, `DONE_FILE`) — the core stays env-free.
+//! Shared path resolution for the TUI and one-shot CLI commands.
 
+use std::ffi::OsString;
 use std::fs::OpenOptions;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::sample;
 
-/// Resolve the todo.txt path. Resolution order (todo.sh-compatible):
-///
-/// * `Some(path)` — an explicit positional CLI argument (TUI only) wins,
-///   creating an empty file if it doesn't exist.
-/// * `$TODO_FILE` — used verbatim if set.
-/// * `$TODO_DIR/todo.txt` — if `TODO_DIR` is set.
-/// * `./todo.txt` — if it exists in the current directory.
-/// * Otherwise — the bundled sample in the temp dir.
-///
-/// For every case except the cwd/sample fallbacks the file (and any missing
-/// parent directories) is created if absent, so a first run just works.
-pub fn resolve_path(arg: Option<String>) -> io::Result<PathBuf> {
-    if let Some(p) = arg {
-        return ensure_file(PathBuf::from(p));
-    }
-    if let Some(f) = std::env::var_os("TODO_FILE") {
-        return ensure_file(PathBuf::from(f));
-    }
-    if let Some(dir) = std::env::var_os("TODO_DIR") {
-        return ensure_file(PathBuf::from(dir).join("todo.txt"));
-    }
-    let cwd_todo = PathBuf::from("todo.txt");
-    if cwd_todo.is_file() {
-        return Ok(cwd_todo);
-    }
-    sample_path()
+/// Default data root; an explicit TODO_DIR overrides ~/.todot.
+pub fn data_dir() -> io::Result<PathBuf> {
+    default_dir(std::env::var_os("TODO_DIR"), std::env::var_os("HOME"))
 }
 
-/// Resolve the `done.txt` path for archiving. Honors `$DONE_FILE`; otherwise
-/// the sibling `done.txt` next to the todo file (the core's default).
+fn default_dir(todo_dir: Option<OsString>, home: Option<OsString>) -> io::Result<PathBuf> {
+    if let Some(dir) = todo_dir {
+        return Ok(PathBuf::from(dir));
+    }
+    home.map(|h| PathBuf::from(h).join(".todot"))
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "HOME 未设置，请指定 TODO_DIR 或 TODO_FILE",
+            )
+        })
+}
+
+/// Explicit FILE → TODO_FILE → TODO_DIR/todo.txt → ~/.todot/todo.txt.
+/// Never implicitly reads the current directory or opens sample data.
+pub fn resolve_path(arg: Option<String>) -> io::Result<PathBuf> {
+    ensure_file(decide_path(
+        arg,
+        std::env::var_os("TODO_FILE"),
+        std::env::var_os("TODO_DIR"),
+        std::env::var_os("HOME"),
+    )?)
+}
+
+fn decide_path(
+    arg: Option<String>,
+    todo_file: Option<OsString>,
+    todo_dir: Option<OsString>,
+    home: Option<OsString>,
+) -> io::Result<PathBuf> {
+    if let Some(p) = arg {
+        return Ok(PathBuf::from(p));
+    }
+    if let Some(f) = todo_file {
+        return Ok(PathBuf::from(f));
+    }
+    Ok(default_dir(todo_dir, home)?.join("todo.txt"))
+}
+
+/// DONE_FILE overrides the sibling done.txt next to the selected todo file.
 pub fn done_path(todo_path: &Path) -> PathBuf {
     if let Some(f) = std::env::var_os("DONE_FILE") {
         return PathBuf::from(f);
     }
     todo_path
         .parent()
-        .map(|p| p.join("done.txt"))
-        .unwrap_or_else(|| PathBuf::from("done.txt"))
+        .unwrap_or_else(|| Path::new("."))
+        .join("done.txt")
 }
 
-/// Create `pb` (and any missing parent directories) if it doesn't exist, then
-/// return it. `create_new` avoids the TOCTOU window where a concurrently-created
-/// file would otherwise be truncated.
+/// Create missing directories and file without truncating existing data.
 pub fn ensure_file(pb: PathBuf) -> io::Result<PathBuf> {
     if let Some(parent) = pb.parent().filter(|p| !p.as_os_str().is_empty()) {
-        std::fs::create_dir_all(parent)?;
+        let mut dirs = std::fs::DirBuilder::new();
+        dirs.recursive(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            dirs.mode(0o700);
+        }
+        dirs.create(parent)?;
     }
-    match OpenOptions::new().write(true).create_new(true).open(&pb) {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    match options.open(&pb) {
         Ok(_) => {}
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
         Err(e) => return Err(e),
@@ -64,69 +89,10 @@ pub fn ensure_file(pb: PathBuf) -> io::Result<PathBuf> {
     Ok(pb)
 }
 
-/// Resolve the TUI target without the sample fallback. Mirrors
-/// [`resolve_path`]'s precedence (arg → `$TODO_FILE` → `$TODO_DIR` →
-/// `./todo.txt`), but when none of those apply it returns
-/// [`Target::FirstRun`] so the caller can prompt instead of silently
-/// opening the sample. `File` targets are created if absent, exactly like
-/// `resolve_path`.
-pub fn resolve_target(arg: Option<String>) -> io::Result<Target> {
-    let decision = decide_target(
-        arg,
-        std::env::var_os("TODO_FILE"),
-        std::env::var_os("TODO_DIR"),
-        Path::new("todo.txt").is_file(),
-    );
-    match decision {
-        TargetDecision::File(pb) => Ok(Target::File(ensure_file(pb)?)),
-        TargetDecision::FirstRun => Ok(Target::FirstRun),
-    }
-}
-
-/// What the TUI should open. `File` is a concrete path (created on resolve if
-/// missing); `FirstRun` means nothing was specified and no `./todo.txt`
-/// exists, so the caller should show the welcome prompt.
-pub enum Target {
-    File(PathBuf),
-    FirstRun,
-}
-
-/// Pure decision half of [`resolve_target`]: precedence only, no filesystem
-/// side effects. Split out so the precedence is unit-testable without
-/// touching the process environment or cwd.
-fn decide_target(
-    arg: Option<String>,
-    todo_file: Option<std::ffi::OsString>,
-    todo_dir: Option<std::ffi::OsString>,
-    cwd_todo_exists: bool,
-) -> TargetDecision {
-    if let Some(p) = arg {
-        return TargetDecision::File(PathBuf::from(p));
-    }
-    if let Some(f) = todo_file {
-        return TargetDecision::File(PathBuf::from(f));
-    }
-    if let Some(dir) = todo_dir {
-        return TargetDecision::File(PathBuf::from(dir).join("todo.txt"));
-    }
-    if cwd_todo_exists {
-        return TargetDecision::File(PathBuf::from("todo.txt"));
-    }
-    TargetDecision::FirstRun
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum TargetDecision {
-    File(PathBuf),
-    FirstRun,
-}
-
-/// Write the bundled sample todo.txt to the system temp dir and return
-/// its path. Also resets the sibling `done.txt` so a previous session's
-/// archived rows don't leak back as duplicates.
+/// Explicit --sample remains available; never used as a default.
 pub fn sample_path() -> io::Result<PathBuf> {
     let dir = std::env::temp_dir();
-    let pb = dir.join("tuxedo-sample.txt");
+    let pb = dir.join("todot-sample.txt");
     std::fs::write(&pb, sample::TODO_RAW)?;
     match std::fs::remove_file(dir.join("done.txt")) {
         Ok(_) => {}
@@ -139,40 +105,38 @@ pub fn sample_path() -> io::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::OsString;
 
     #[test]
-    fn explicit_arg_wins_over_everything() {
-        let d = decide_target(
-            Some("custom.txt".into()),
-            Some(OsString::from("/env/file.txt")),
-            Some(OsString::from("/env/dir")),
-            true,
+    fn path_precedence_and_default() {
+        let file = Some(OsString::from("/env/file.txt"));
+        let dir = Some(OsString::from("/env/dir"));
+        let home = Some(OsString::from("/home/user"));
+        assert_eq!(
+            decide_path(
+                Some("custom.txt".into()),
+                file.clone(),
+                dir.clone(),
+                home.clone()
+            )
+            .unwrap(),
+            PathBuf::from("custom.txt")
         );
-        assert_eq!(d, TargetDecision::File(PathBuf::from("custom.txt")));
-    }
-
-    #[test]
-    fn todo_file_env_used_verbatim_when_no_arg() {
-        let d = decide_target(None, Some(OsString::from("/env/file.txt")), None, true);
-        assert_eq!(d, TargetDecision::File(PathBuf::from("/env/file.txt")));
-    }
-
-    #[test]
-    fn todo_dir_env_appends_todo_txt() {
-        let d = decide_target(None, None, Some(OsString::from("/env/dir")), true);
-        assert_eq!(d, TargetDecision::File(PathBuf::from("/env/dir/todo.txt")));
-    }
-
-    #[test]
-    fn existing_cwd_todo_txt_opens_directly() {
-        let d = decide_target(None, None, None, true);
-        assert_eq!(d, TargetDecision::File(PathBuf::from("todo.txt")));
-    }
-
-    #[test]
-    fn nothing_specified_is_first_run() {
-        let d = decide_target(None, None, None, false);
-        assert_eq!(d, TargetDecision::FirstRun);
+        assert_eq!(
+            decide_path(None, file, dir.clone(), home.clone()).unwrap(),
+            PathBuf::from("/env/file.txt")
+        );
+        assert_eq!(
+            decide_path(None, None, dir, home.clone()).unwrap(),
+            PathBuf::from("/env/dir/todo.txt")
+        );
+        assert_eq!(
+            decide_path(None, None, None, home).unwrap(),
+            PathBuf::from("/home/user/.todot/todo.txt")
+        );
+        assert!(decide_path(None, None, None, None).is_err());
+        assert_eq!(
+            decide_path(None, Some("explicit.txt".into()), None, None).unwrap(),
+            PathBuf::from("explicit.txt")
+        );
     }
 }

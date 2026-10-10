@@ -1,0 +1,36 @@
+---
+source: tests/snapshots.rs
+expression: buffer_to_text(&buf)
+---
+ 筛 选                       ▶▮◀ /tmp/todot-snapshot.txt  •  15 项 任  详 情                              
+                                                                                                    
+ 项 目                       (2)  优 先 级  A  ──────────────────────── 优 先 级     (A)                    
+   +work             4      1 ▸ (A) Finish Q2 board deck +work @la 创 建 日 期   2026-05-01             
+   +health           3      2   (A) Call dentist to reschedule cle 截 止 日 期   2026-05-06  今 天        
+   +finance          2     (3)  优 先 级  B  ──────────────────────── 项 目       +work                  
+   +home            ┌ todot · 主 题  ────────────────────────────────────────────┐ptop                
+   +learning        │ 模 式 ： 固 定 （ m 切 换 ）                                      │                    
+   +personal        │   固 定 ／ 回 退 ： Muted Slate                                │                    
+   +travel          │ ▶ 深 色 ： Terminal                                         │                    
+                    │   浅 色 ： Dawn                                             │1 Finish Q2 board   
+ 场 景                │ 检 测 ： 未 检 测                                              │aptop               
+   @errands         │   Muted Slate                                            │6                   
+   @home            │   Dawn                                                   │                    
+   @laptop          │   Nord                                                   │                    
+   @phone           │   Matrix                                                 │                    
+                    │ ▶ Terminal                                               │                    
+                    │                                                          │                    
+                    │                                                          │                    
+                    │                                                          │                    
+                    │                                                          │                    
+                    │                                                          │                    
+                    │                                                          │                    
+                    │ Tab 槽 位  · m 模 式  · j/k/T 预 览                            │                    
+                    │ Enter 保 存  · Esc 取 消  · Ctrl+L 重 测                       │                    
+                    └──────────────────────────────────────────────────────────┘                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+ 选 择 主 题    Tab 槽 位  · m 模 式  · j/k 预 览  · Enter 保 存  · Esc 15 项 待 办  · 2026-05-06 · todot 2026.8.1

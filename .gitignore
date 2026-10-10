@@ -1,4 +1,5 @@
 /.local/
+/.codegraph/
 /.config/
 /target/
 /todo.txt
@@ -8,6 +9,7 @@
 /notes/
 /docs/screenshots/
 *.tuxedo-lock
+*.todot-lock
 .*.tmp.*
 __pycache__/
 *.snap.new

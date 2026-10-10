@@ -24,6 +24,7 @@ jobs:
           key: ${{ runner.os }}-rust-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
       - name: Build and test current source
         run: |
-          bash -n install.sh start.sh
+          bash -n install.sh migrate-data.sh
           ./install.sh --test
           python3 tests/check.py
+          python3 tests/theme_terminal.py

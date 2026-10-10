@@ -1,6 +1,6 @@
-//! Persisted UI preferences, located per the XDG Base Directory Specification.
+//! Persisted UI preferences under the data root, with an explicit XDG override.
 //!
-//! Path: `${XDG_CONFIG_HOME:-$HOME/.config}/tuxedo/config.toml`
+//! Default: `~/.todot/config/todot/config.toml`.
 //!
 //! Format: simple `key = value` lines. Lines starting with `#` and blank lines
 //! are ignored. Unknown keys are ignored so older binaries won't choke on
@@ -18,6 +18,10 @@ use crate::app::{Density, Sort};
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Config {
     pub theme: Option<String>,
+    /// Legacy configs remain fixed unless explicitly set to `auto`.
+    pub theme_auto: Option<bool>,
+    pub theme_dark: Option<String>,
+    pub theme_light: Option<String>,
     pub density: Option<Density>,
     pub sort: Option<Sort>,
     pub show_left: Option<bool>,
@@ -110,8 +114,8 @@ impl Config {
         Ok(())
     }
 
-    /// Resolve `${XDG_CONFIG_HOME:-$HOME/.config}/tuxedo/config.toml`.
-    /// Returns None only when neither XDG_CONFIG_HOME nor HOME is set.
+    /// Resolve `<data root>/config/todot/config.toml`, honoring XDG_CONFIG_HOME.
+    /// Returns None when neither an override nor HOME is available.
     pub fn path() -> Option<PathBuf> {
         let base = crate::xdg::config_home()?;
         Some(Self::path_in(&base))
@@ -128,7 +132,7 @@ impl Config {
     /// Construct the config path under an explicit XDG-style base directory.
     /// Used by tests to avoid mutating process env.
     pub fn path_in(xdg_base: &Path) -> PathBuf {
-        xdg_base.join("tuxedo").join("config.toml")
+        xdg_base.join("todot").join("config.toml")
     }
 }
 
@@ -146,6 +150,15 @@ fn parse(s: &str) -> Config {
         let v = unquote(v.trim());
         match k {
             "theme" => c.theme = Some(v.to_string()),
+            "theme_mode" => {
+                c.theme_auto = match v {
+                    "auto" => Some(true),
+                    "fixed" => Some(false),
+                    _ => None,
+                }
+            }
+            "theme_dark" => c.theme_dark = Some(v.to_string()),
+            "theme_light" => c.theme_light = Some(v.to_string()),
             "density" => c.density = v.parse().ok(),
             "sort" => c.sort = v.parse().ok(),
             "show_left" => c.show_left = parse_bool(v),
@@ -197,10 +210,19 @@ fn parse(s: &str) -> Config {
 }
 
 fn serialize(c: &Config) -> String {
-    let mut out = String::from("# tuxedo config\n");
+    let mut out = String::from("# todot config\n");
     // writeln! against a String is infallible; the unwrap can never fire.
     if let Some(v) = &c.theme {
         let _ = writeln!(out, "theme = {v}");
+    }
+    if let Some(auto) = c.theme_auto {
+        let _ = writeln!(out, "theme_mode = {}", if auto { "auto" } else { "fixed" });
+    }
+    if let Some(v) = &c.theme_dark {
+        let _ = writeln!(out, "theme_dark = {v}");
+    }
+    if let Some(v) = &c.theme_light {
+        let _ = writeln!(out, "theme_light = {v}");
     }
     if let Some(v) = c.density {
         let _ = writeln!(out, "density = {v}");
@@ -275,6 +297,9 @@ mod tests {
     fn round_trips() {
         let c = Config {
             theme: Some("Nord".into()),
+            theme_auto: Some(true),
+            theme_dark: Some("Muted Slate".into()),
+            theme_light: Some("Dawn".into()),
             density: Some(Density::Cozy),
             sort: Some(Sort::Due),
             show_left: Some(false),
@@ -298,6 +323,14 @@ mod tests {
         let s = serialize(&c);
         let parsed = parse(&s);
         assert_eq!(parsed, c);
+    }
+
+    #[test]
+    fn theme_modes_are_opt_in_and_invalid_modes_remain_fixed() {
+        assert_eq!(parse("theme = Dawn\n").theme_auto, None);
+        assert_eq!(parse("theme_mode = auto\n").theme_auto, Some(true));
+        assert_eq!(parse("theme_mode = fixed\n").theme_auto, Some(false));
+        assert_eq!(parse("theme_mode = invalid\n").theme_auto, None);
     }
 
     #[test]
@@ -424,17 +457,20 @@ mod tests {
     #[test]
     fn save_then_load_via_explicit_path() {
         let base = std::env::temp_dir().join(format!(
-            "tuxedo-test-{}-{:?}",
+            "todot-test-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
         let _ = fs::remove_dir_all(&base);
         let path = Config::path_in(&base);
         assert!(path.starts_with(&base));
-        assert!(path.ends_with("tuxedo/config.toml"));
+        assert!(path.ends_with("todot/config.toml"));
 
         let written = Config {
             theme: Some("Dawn".into()),
+            theme_auto: Some(false),
+            theme_dark: Some("Nord".into()),
+            theme_light: Some("Dawn".into()),
             density: Some(Density::Compact),
             sort: Some(Sort::File),
             show_left: Some(false),

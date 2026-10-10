@@ -3,7 +3,54 @@ use std::io;
 use super::types::{Density, Sort};
 use crate::app::WeekStart;
 use crate::config::Config;
-use crate::theme::{self, Theme};
+use crate::theme::{self, ColorMode, Theme};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeSlot {
+    Fixed,
+    Dark,
+    Light,
+}
+
+impl ThemeSlot {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Fixed => "固定／回退",
+            Self::Dark => "深色",
+            Self::Light => "浅色",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThemePrefs {
+    pub auto: bool,
+    pub fixed: usize,
+    pub dark: usize,
+    pub light: usize,
+}
+
+impl ThemePrefs {
+    pub fn index(self, slot: ThemeSlot) -> usize {
+        match slot {
+            ThemeSlot::Fixed => self.fixed,
+            ThemeSlot::Dark => self.dark,
+            ThemeSlot::Light => self.light,
+        }
+    }
+
+    pub fn active_slot(self, mode: Option<ColorMode>) -> ThemeSlot {
+        match (self.auto, mode) {
+            (true, Some(ColorMode::Dark)) => ThemeSlot::Dark,
+            (true, Some(ColorMode::Light)) => ThemeSlot::Light,
+            _ => ThemeSlot::Fixed,
+        }
+    }
+
+    pub fn mode_label(self) -> &'static str {
+        if self.auto { "跟随终端" } else { "固定" }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Layout {
@@ -30,6 +77,7 @@ impl Default for Layout {
 #[derive(Debug, Clone)]
 pub struct Prefs {
     theme_idx: usize,
+    pub themes: ThemePrefs,
     pub density: Density,
     pub sort: Sort,
     pub layout: Layout,
@@ -52,8 +100,24 @@ impl Prefs {
             .as_deref()
             .and_then(|name| theme::all().iter().position(|t| t.name == name))
             .unwrap_or(0);
+        let resolve = |name: &Option<String>, default: usize| {
+            name.as_deref()
+                .map(|name| {
+                    theme::all()
+                        .iter()
+                        .position(|t| t.name == name)
+                        .unwrap_or(theme_idx)
+                })
+                .unwrap_or(default)
+        };
         Self {
             theme_idx,
+            themes: ThemePrefs {
+                auto: cfg.theme_auto.unwrap_or(false),
+                fixed: theme_idx,
+                dark: resolve(&cfg.theme_dark, 0),
+                light: resolve(&cfg.theme_light, 1),
+            },
             density: cfg.density.unwrap_or(Density::Comfortable),
             sort: cfg.sort.unwrap_or(Sort::Priority),
             layout: Layout {
@@ -88,13 +152,30 @@ impl Prefs {
 
     pub fn sort_label(&self) -> &'static str {
         match self.sort {
-            Sort::Priority => "优先级", Sort::Due => "截止日期", Sort::File => "文件顺序",
+            Sort::Priority => "优先级",
+            Sort::Due => "截止日期",
+            Sort::File => "文件顺序",
         }
     }
 
-    pub fn cycle_theme(&mut self) -> String {
-        self.theme_idx = (self.theme_idx + 1) % theme::all().len();
-        format!("主题：{}", self.theme().name)
+    pub fn apply_terminal_mode(&mut self, mode: Option<ColorMode>) {
+        self.set_theme_idx(self.themes.index(self.themes.active_slot(mode)));
+    }
+
+    pub fn set_slot_theme(&mut self, slot: ThemeSlot, idx: usize) {
+        let idx = idx % theme::all().len();
+        match slot {
+            ThemeSlot::Fixed => self.themes.fixed = idx,
+            ThemeSlot::Dark => self.themes.dark = idx,
+            ThemeSlot::Light => self.themes.light = idx,
+        }
+        self.set_theme_idx(idx);
+    }
+
+    pub fn cycle_theme(&mut self, mode: Option<ColorMode>) -> String {
+        let slot = self.themes.active_slot(mode);
+        self.set_slot_theme(slot, self.themes.index(slot) + 1);
+        format!("{}主题：{}", slot.label(), self.theme().name)
     }
 
     pub fn cycle_density(&mut self) -> String {
@@ -103,9 +184,14 @@ impl Prefs {
             Density::Comfortable => Density::Cozy,
             Density::Cozy => Density::Compact,
         };
-        format!("行间距：{}", match self.density {
-            Density::Compact => "紧凑", Density::Comfortable => "适中", Density::Cozy => "宽松",
-        })
+        format!(
+            "行间距：{}",
+            match self.density {
+                Density::Compact => "紧凑",
+                Density::Comfortable => "适中",
+                Density::Cozy => "宽松",
+            }
+        )
     }
 
     pub fn cycle_sort(&mut self) -> String {
@@ -142,22 +228,29 @@ impl Prefs {
             WeekStart::Sunday => WeekStart::Monday,
             WeekStart::Monday => WeekStart::Sunday,
         };
-        format!("每周起始日：{}", match self.week_start {
-            WeekStart::Sunday => "周日", WeekStart::Monday => "周一",
-        })
+        format!(
+            "每周起始日：{}",
+            match self.week_start {
+                WeekStart::Sunday => "周日",
+                WeekStart::Monday => "周一",
+            }
+        )
     }
 
-    /// Persist to the XDG config path. Returns the IO error so the caller
-    /// can flash it (writing to stderr from inside the alt-screen would
-    /// corrupt the TUI). Saving is best-effort — callers that don't care
-    /// about reporting can `let _ = prefs.save();`.
-    ///
-    /// Loads the on-disk config first so non-pref fields (like
-    /// `share_token` / `share_port`, owned by the capture server) are
-    /// preserved across pref toggles.
+    /// Serialize configured slots, never the active or previewed theme.
+    pub fn write_theme_config(&self, cfg: &mut Config) {
+        let all = theme::all();
+        cfg.theme = Some(all[self.themes.fixed].name.to_string());
+        cfg.theme_auto = Some(self.themes.auto);
+        cfg.theme_dark = Some(all[self.themes.dark].name.to_string());
+        cfg.theme_light = Some(all[self.themes.light].name.to_string());
+    }
+
+    /// Load first so non-pref fields, including the capture token, survive.
+    /// The caller reports errors inside the TUI without corrupting its output.
     pub fn save(&self) -> io::Result<()> {
         let mut cfg = Config::load();
-        cfg.theme = Some(self.theme().name.to_string());
+        self.write_theme_config(&mut cfg);
         cfg.density = Some(self.density);
         cfg.sort = Some(self.sort);
         cfg.show_left = Some(self.layout.left);
