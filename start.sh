@@ -8,10 +8,20 @@ if [[ ! -x "$BIN" ]]; then
     exit 1
 fi
 
-export TODO_DIR="$ROOT" TODO_FILE="$ROOT/todo.txt" DONE_FILE="$ROOT/done.txt"
-export XDG_CONFIG_HOME="$ROOT/.config" NOTES_DIR="$ROOT/notes" TUXEDO_NO_UPDATE_CHECK=1
-mkdir -p "$XDG_CONFIG_HOME/tuxedo"
-chmod 700 "$XDG_CONFIG_HOME"
+case "${1:-}" in
+    --help|-h|--version|-V) exec "$BIN" "$@" ;;
+esac
+
+DATA=${TODO_TUI_HOME:-${HOME:?HOME 未设置}/.todo-tui}
+if [[ $DATA != /* ]]; then printf 'TODO_TUI_HOME 必须为绝对路径。\n' >&2; exit 2; fi
+if [[ ! -e $DATA && ! -L $DATA && -f $ROOT/todo.txt ]]; then
+    "$ROOT/migrate-data.sh" >&2
+fi
+umask 077
+export TODO_DIR="$DATA" TODO_FILE="$DATA/todo.txt" DONE_FILE="$DATA/done.txt"
+export XDG_CONFIG_HOME="$DATA/config" NOTES_DIR="$DATA/notes" TUXEDO_NO_UPDATE_CHECK=1
+mkdir -p "$NOTES_DIR" "$XDG_CONFIG_HOME/tuxedo"
+chmod 700 "$DATA" "$XDG_CONFIG_HOME"
 
 # 本项目直接维护源码，不使用官方更新指引。
 if [[ ${1:-} == update ]]; then

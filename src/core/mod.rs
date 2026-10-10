@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::todo::{self, Task};
 
 mod archive;
+mod body;
 mod external;
 mod history;
 mod mutations;
@@ -33,6 +34,7 @@ pub struct Store {
     pub(crate) history: History,
     pub(crate) archive: Archive,
     pub(crate) file_path: PathBuf,
+    pub(crate) notes_dir: PathBuf,
     /// Snapshot of the file body the last time we read or wrote it; used by
     /// `reconcile` to detect external edits.
     pub(crate) last_disk: String,
@@ -80,14 +82,20 @@ impl Store {
 
     fn assemble(file_path: PathBuf, archive: Archive, body: String, today: String) -> Self {
         let tasks = todo::parse_file(&body);
+        let notes_dir = file_path.parent().unwrap_or(Path::new(".")).join("notes");
         Self {
             tasks,
             history: History::default(),
             archive,
             file_path,
+            notes_dir,
             last_disk: body,
             today,
         }
+    }
+
+    pub fn set_notes_dir(&mut self, path: PathBuf) {
+        self.notes_dir = path;
     }
 
     pub fn tasks(&self) -> &[Task] {

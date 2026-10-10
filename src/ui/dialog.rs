@@ -282,15 +282,32 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let [_p1, input_area, preview_area, _p2, hint_area, _p3] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
+    let header_h = if app.body.focused && inner.height < 6 {
+        0
+    } else {
+        1
+    };
+    let [
+        label_area,
+        input_area,
+        preview_area,
+        _sp,
+        body_area,
+        hint_area,
+    ] = Layout::vertical([
+        Constraint::Length(header_h),
+        Constraint::Length(header_h),
+        Constraint::Length(header_h),
+        Constraint::Length(0),
+        Constraint::Min(1),
         Constraint::Length(1),
     ])
     .areas(inner);
+    frame.render_widget(
+        Paragraph::new("  标题（任务属性在此解析）")
+            .style(Style::default().fg(theme.dim).bg(theme.panel)),
+        label_area,
+    );
 
     // Split the input row into a fixed prefix ("  › ") and a scrollable
     // content area. Without this, long drafts get clipped at the dialog's
@@ -316,16 +333,20 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         prefix_area,
     );
 
-    let content_line = Line::from(highlighted_draft_spans(
-        app.draft.text(),
-        app.draft.cursor(),
-        theme,
-    ))
+    let content_line = Line::from(if app.body.focused {
+        vec![Span::raw(app.draft.text())]
+    } else {
+        highlighted_draft_spans(app.draft.text(), app.draft.cursor(), theme)
+    })
     .style(Style::default().bg(theme.panel));
     let cursor = app.draft.cursor().min(app.draft.text().len());
     let cursor_col = Span::raw(&app.draft.text()[..cursor]).width();
-    let cursor_width = app.draft.text()[cursor..].chars().next()
-        .map(|c| Span::raw(c.to_string()).width()).unwrap_or(1).max(1);
+    let cursor_width = app.draft.text()[cursor..]
+        .chars()
+        .next()
+        .map(|c| Span::raw(c.to_string()).width())
+        .unwrap_or(1)
+        .max(1);
     let avail = content_area.width as usize;
     // Pin the cursor to the rightmost visible column whenever it would
     // otherwise overflow. Stateless: when the cursor moves left of the
@@ -348,10 +369,84 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         preview_area,
     );
 
-    let hint = hint_line(theme);
+    render_body(frame, body_area, app);
     frame.render_widget(
-        Paragraph::new(hint).style(Style::default().bg(theme.panel)),
+        Paragraph::new(if app.body.focused {
+            " Ctrl-S保存 · Tab标题 · Enter换行"
+        } else {
+            " Enter保存 · Tab正文 · Ctrl-S保存"
+        })
+        .style(Style::default().fg(theme.dim).bg(theme.panel)),
         hint_area,
+    );
+}
+
+fn render_body(frame: &mut Frame, area: Rect, app: &App) {
+    let theme = app.theme();
+    let border = Block::default()
+        .borders(Borders::ALL)
+        .title(if app.body.focused {
+            " 正文 · 输入中（不解析） "
+        } else {
+            " 正文 · Tab 编辑 "
+        })
+        .border_style(Style::default().fg(if app.body.focused {
+            theme.accent
+        } else {
+            theme.border
+        }))
+        .style(Style::default().fg(theme.fg).bg(theme.panel));
+    let inner = border.inner(area);
+    frame.render_widget(border, area);
+    let draft = &app.body.draft;
+    let text = crate::note::display_text(draft.text());
+    let cursor = crate::note::display_text(&draft.text()[..draft.cursor()]).len();
+    let start = text[..cursor].rfind('\n').map_or(0, |i| i + 1);
+    let row = text[..cursor].bytes().filter(|&b| b == b'\n').count();
+    let col = Span::raw(&text[start..cursor]).width();
+    let cursor_width = text[cursor..]
+        .chars()
+        .next()
+        .map(|c| Span::raw(c.to_string()).width())
+        .unwrap_or(1)
+        .max(1);
+    let scroll_y = if app.body.focused {
+        row.saturating_sub(usize::from(inner.height.saturating_sub(1)))
+    } else {
+        0
+    };
+    let scroll_x = if app.body.focused {
+        col.saturating_sub(usize::from(inner.width).saturating_sub(cursor_width))
+    } else {
+        0
+    };
+    let lines = text
+        .split('\n')
+        .scan(0, |offset, line| {
+            let begin = *offset;
+            *offset += line.len() + 1;
+            Some(
+                if app.body.focused && cursor >= begin && cursor <= begin + line.len() {
+                    Line::from(draft_cursor_spans(
+                        line,
+                        cursor - begin,
+                        theme.fg,
+                        theme.panel,
+                    ))
+                } else {
+                    Line::raw(line)
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    frame.render_widget(
+        Paragraph::new(lines)
+            .style(Style::default().fg(theme.fg).bg(theme.panel))
+            .scroll((
+                scroll_y.min(usize::from(u16::MAX)) as u16,
+                scroll_x.min(usize::from(u16::MAX)) as u16,
+            )),
+        inner,
     );
 }
 
@@ -516,7 +611,11 @@ pub fn render_autocomplete(frame: &mut Frame, dlg: Rect, screen: Rect, app: &App
         TokenKind::Context => ('@', theme.context),
     };
 
-    let longest = matches.iter().map(|s| Span::raw(*s).width()).max().unwrap_or(0);
+    let longest = matches
+        .iter()
+        .map(|s| Span::raw(*s).width())
+        .max()
+        .unwrap_or(0);
     // +3 = leading space, sigil, trailing space.
     let popup_w: u16 = (((longest as u16).saturating_add(3)).max(16)).min(dlg.width.max(16));
     let popup_h: u16 = matches.len() as u16;
@@ -1004,8 +1103,8 @@ fn render_recurrence_builder(frame: &mut Frame, dlg: Rect, screen: Rect, app: &A
     // silently drifts when the mode-line copy changes. The `+ 2` keeps a
     // 2-cell margin from the right border when there's room.
     let left_width: usize = line2_spans.iter().map(|s| s.width()).sum();
-    let next_pad =
-        (inner.width as usize).saturating_sub(left_width + Span::raw(next_label.as_str()).width() + 2);
+    let next_pad = (inner.width as usize)
+        .saturating_sub(left_width + Span::raw(next_label.as_str()).width() + 2);
     line2_spans.push(Span::styled(
         " ".repeat(next_pad),
         Style::default().bg(theme.panel),
@@ -1239,15 +1338,6 @@ fn format_focused(d: chrono::NaiveDate) -> String {
     format!("{dow} {mon}{}日", d.day())
 }
 
-fn hint_line<'a>(theme: &Theme) -> Line<'a> {
-    let mut spans = vec![
-        Span::raw("  "),
-        Span::styled("格式：", Style::default().fg(theme.dim)),
-    ];
-    spans.extend(format_hint_spans(theme));
-    Line::from(spans).style(Style::default().bg(theme.panel))
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -1266,7 +1356,7 @@ mod tests {
         // The popup begins at dlg.y + dlg.height and is up to 8 rows tall.
         let rows = buf.area.height;
         let cols = buf.area.width;
-        let dlg_h: u16 = 8;
+        let dlg_h: u16 = crate::ui::DIALOG_H;
         let dlg_y = (rows.saturating_sub(dlg_h)) / 2;
         let popup_top = dlg_y + dlg_h;
         let popup_bottom = (popup_top + 8).min(rows);
@@ -1474,7 +1564,7 @@ mod tests {
         let buf = terminal.backend().buffer();
         // Dialog is 8 rows tall, centered in a 30-row area; input lives on
         // the second inner row (top border + 1 row padding + input).
-        let dlg_y = (30u16 - 8) / 2;
+        let dlg_y = (30u16 - crate::ui::DIALOG_H) / 2;
         let input_y = dlg_y + 2;
         let mut row = String::new();
         for x in 0..80 {
@@ -1492,9 +1582,14 @@ mod tests {
         let app = build_insert_app("unicode\n", &draft);
         let mut terminal = Terminal::new(TestBackend::new(80, 30)).unwrap();
         terminal.draw(|f| crate::ui::draw(f, &app)).unwrap();
-        let input_y = (30u16 - 8) / 2 + 2;
-        let row: String = (0..80).map(|x| terminal.backend().buffer()[(x, input_y)].symbol()).collect();
-        assert!(row.contains("中 文 尾 部"), "Chinese tail must remain visible: {row}");
+        let input_y = (30u16 - crate::ui::DIALOG_H) / 2 + 2;
+        let row: String = (0..80)
+            .map(|x| terminal.backend().buffer()[(x, input_y)].symbol())
+            .collect();
+        assert!(
+            row.contains("中 文 尾 部"),
+            "Chinese tail must remain visible: {row}"
+        );
         assert_eq!(super::pad_to("中文", 6), "中文  ");
     }
 
@@ -1505,7 +1600,10 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| crate::ui::draw(f, &app)).unwrap();
         let text = dialog_inner_text(terminal.backend().buffer());
-        assert!(text.replace(' ', "").contains("有效"), "preview should say 'ok'\n{text}");
+        assert!(
+            text.replace(' ', "").contains("有效"),
+            "preview should say 'ok'\n{text}"
+        );
         assert!(
             text.replace(' ', "").contains("优先级A"),
             "preview should show 'pri A'\n{text}"

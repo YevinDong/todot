@@ -231,15 +231,11 @@ fn push_token_spans<'a>(
 }
 
 /// True when `token` is a `key:value` pair whose key (case-insensitively)
-/// appears in `hidden_keys`. Empty list short-circuits so the common path
-/// stays allocation- and comparison-free.
+/// appears in `hidden_keys`. The internal note-file link is always hidden.
 fn is_hidden_kv(token: &str, hidden_keys: &[String]) -> bool {
-    if hidden_keys.is_empty() {
-        return false;
-    }
     match token.split_once(':') {
         Some((k, v)) if !k.is_empty() && !v.is_empty() => {
-            hidden_keys.iter().any(|h| h.eq_ignore_ascii_case(k))
+            k.eq_ignore_ascii_case("note") || hidden_keys.iter().any(|h| h.eq_ignore_ascii_case(k))
         }
         _ => false,
     }

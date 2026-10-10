@@ -12,17 +12,18 @@ expression: buffer_to_text(&buf)
    +learning         1      4   (B) Renew passport before summer t                                  
    +personal         1      5   (B) Draft hiring rubric for senior 原 始 记 录                          
    +travel           1     (2)  优 先 级  C  ────────────────────────                                  
-                            6   (C) Pay quarterly estimated taxes  (A) 2026-05-01 Finish Q2 board   
- 场 景                        7   (C) Order new running shoes +healt deck +work @laptop               
-   @errands          4     (8)┌ 新 建 任 务  ────────────────────────────┐:2026-05-06                   
-   @home             4      8 │                                      │                              
-   @laptop           4      9 │  › bank due:2026-06-01 rec:+1m t:-3d█│                              
-   @phone            3     10 │  有 效  · 截 止  2026-06-01 · 1 +项 目  1 @│                              
-                           11 │                                      │                              
-                           12 │  格 式 ： (A) 买 牛 奶  +购 物  @家  due:2026-│                              
-                           13 │                                      │                              
-                           14 └──────────────────────────────────────┘                              
-                           15       Replace bathroom faucet washer                                  
+                            6 ┌ 新 建 任 务  ────────────────────────────┐ 2026-05-01 Finish Q2 board   
+ 场 景                        7 │  标 题 （ 任 务 属 性 在 此 解 析 ）             │k +work @laptop               
+   @errands          4     (8)│  › bank due:2026-06-01 rec:+1m t:-3d█│:2026-05-06                   
+   @home             4      8 │  有 效  · 截 止  2026-06-01 · 1 +项 目  1 @│                              
+   @laptop           4      9 │┌ 正 文  · Tab 编 辑  ───────────────────┐│                              
+   @phone            3     10 ││                                    ││                              
+                           11 ││                                    ││                              
+                           12 ││                                    ││                              
+                           13 ││                                    ││                              
+                           14 │└────────────────────────────────────┘│                              
+                           15 │ Enter保 存  · Tab正 文  · Ctrl-S保 存      │                              
+                              └──────────────────────────────────────┘                              
                                                                                                     
                                                                                                     
                                                                                                     
@@ -32,5 +33,4 @@ expression: buffer_to_text(&buf)
                                                                                                     
                                                                                                     
                                                                                                     
-                                                                                                    
- 普 通  · 已 解 析 日 期 ， 请 按  Enter 保 存    h/l 移 动  · w/b/e 跳 词 15 项 待 办  · 2026-05-06 · tuxedo 2026.8.1
+ 普 通  · 已 解 析 日 期 ， 请 按  Enter 保 存    h/l 移 动  · i/a 输 入  ·15 项 待 办  · 2026-05-06 · tuxedo 2026.8.1

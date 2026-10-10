@@ -12,11 +12,11 @@ pub struct NoteTarget {
 }
 
 pub fn notes_dir_from_config(configured: Option<&str>) -> PathBuf {
+    if let Some(value) = std::env::var_os("NOTES_DIR").filter(|s| !s.is_empty()) {
+        return PathBuf::from(value);
+    }
     if let Some(value) = configured.map(str::trim).filter(|s| !s.is_empty()) {
         return expand_note_dir(value);
-    }
-    if let Some(value) = std::env::var_os("NOTES_DIR") {
-        return PathBuf::from(value);
     }
     if let Some(home) = std::env::var_os("HOME") {
         return PathBuf::from(home).join("notes");
@@ -45,11 +45,75 @@ pub fn target_for_task(task: &Task, notes_dir: &Path) -> NoteTarget {
     }
 }
 
+pub(crate) fn task_tokens(raw: &str) -> impl Iterator<Item = (&str, bool)> {
+    let mut in_note = false;
+    raw.split_whitespace().map(move |token| {
+        let quoted = in_note || token.starts_with("note:\"");
+        if in_note {
+            in_note = !token.contains('"');
+        } else if let Some(rest) = token.strip_prefix("note:\"") {
+            in_note = !rest.contains('"');
+        }
+        let linked = !quoted && token.starts_with("note:") && token.len() > 5;
+        (token, linked)
+    })
+}
+
 pub fn note_rel_from_raw(raw: &str) -> Option<String> {
-    raw.split_whitespace()
-        .find_map(|token| token.strip_prefix("note:"))
-        .map(|s| s.trim_matches('"').to_string())
-        .filter(|s| !s.is_empty())
+    task_tokens(raw).find_map(|(token, linked)| linked.then(|| token[5..].to_owned()))
+}
+
+pub fn linked_path(raw: &str, notes_dir: &Path) -> Option<PathBuf> {
+    note_rel_from_raw(raw).map(|rel| path_for_rel(notes_dir, &rel))
+}
+
+pub fn without_link(raw: &str) -> String {
+    task_tokens(raw)
+        .filter_map(|(token, linked)| (!linked).then_some(token))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub fn new_body_rel() -> std::io::Result<String> {
+    let mut bytes = [0u8; 16];
+    getrandom::getrandom(&mut bytes).map_err(|e| std::io::Error::other(e.to_string()))?;
+    let id = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    Ok(format!("tasks/{id}.md"))
+}
+
+pub fn lock_dir(notes_dir: &Path) -> std::io::Result<std::fs::File> {
+    // ponytail: one lock per notes directory; use per-file locks if concurrent writes matter.
+    std::fs::create_dir_all(notes_dir)?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(notes_dir.join(".lock"))?;
+    file.lock()?;
+    Ok(file)
+}
+
+pub fn read_body(path: &Path) -> std::io::Result<Option<String>> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(Some(text)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Safe terminal display only; saved body bytes are never changed.
+pub fn display_text(text: &str) -> String {
+    let mut out = String::new();
+    for ch in text.chars() {
+        match ch {
+            '\n' => out.push('\n'),
+            '\t' => out.push_str("    "),
+            c if c.is_control() => out.push('�'),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 pub fn note_template(task: &Task) -> String {
@@ -233,6 +297,22 @@ mod tests {
             )
         );
         assert!(!target.existed_in_task);
+    }
+
+    #[test]
+    fn quoted_note_tokens_are_not_body_links() {
+        let raw = r#"task note:"keep note:inside.md literal" note:actual.md"#;
+        assert_eq!(note_rel_from_raw(raw).as_deref(), Some("actual.md"));
+        assert_eq!(
+            without_link(raw),
+            r#"task note:"keep note:inside.md literal""#
+        );
+        assert_eq!(note_rel_from_raw(r#"task note:"note:inside.md""#), None);
+        assert_eq!(
+            note_rel_from_raw(r#"task note:"keep note:inside.md literal""#),
+            None
+        );
+        assert_eq!(note_rel_from_raw("task note:"), None);
     }
 
     #[test]

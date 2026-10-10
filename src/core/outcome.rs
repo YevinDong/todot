@@ -14,6 +14,7 @@ pub enum StoreError {
     Write(std::io::Error),
     /// Reading or writing the sibling `done.txt` failed.
     ArchiveIo(std::io::Error),
+    BodyIo(std::io::Error),
     /// A constructed line failed to parse.
     Parse(ParseError),
     /// A `+project` / `@context` mutation was rejected.
@@ -25,6 +26,7 @@ impl std::fmt::Display for StoreError {
         match self {
             StoreError::Write(e) => write!(f, "写入失败：{e}"),
             StoreError::ArchiveIo(e) => write!(f, "done.txt: {e}"),
+            StoreError::BodyIo(e) => write!(f, "正文文件：{e}"),
             StoreError::Parse(e) => write!(f, "{e}"),
             StoreError::Tag(e) => write!(f, "{e}"),
         }
@@ -83,6 +85,7 @@ pub enum MoveOutcome {
 #[derive(Debug)]
 pub enum DeleteOutcome {
     Deleted { abs: usize },
+    CleanupFailed { abs: usize, error: StoreError },
     Aborted(Reconcile),
     OutOfRange,
     Error(StoreError),
@@ -153,6 +156,7 @@ pub enum BulkCompleteOutcome {
 #[derive(Debug)]
 pub enum BulkDeleteOutcome {
     Done { deleted: usize },
+    CleanupFailed { deleted: usize, error: StoreError },
     Nothing,
     Aborted(Reconcile),
     Error(StoreError),
@@ -180,6 +184,7 @@ pub enum UnarchiveOutcome {
 #[derive(Debug)]
 pub enum ArchiveDeleteOutcome {
     Deleted,
+    CleanupFailed(StoreError),
     OutOfRange,
     DoneReloaded,
     Error(StoreError),

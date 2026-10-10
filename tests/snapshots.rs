@@ -565,6 +565,71 @@ fn command_palette_preserves_visual_selection() {
 }
 
 #[test]
+fn body_preview_tracks_cursor_and_body_editor_keeps_tail_visible() {
+    let dir = std::env::temp_dir().join(format!("tuxedo-body-view-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("alpha.md"), "# BODY_ALPHA\n  +plain @plain\n").unwrap();
+    std::fs::write(dir.join("beta.md"), "# BODY_BETA\n").unwrap();
+    let mut app = App::new(
+        dir.join("todo.txt"),
+        "Alpha note:alpha.md\nBeta note:beta.md\n".into(),
+        "2026-10-10".into(),
+        Config {
+            notes_dir: Some(dir.to_string_lossy().into_owned()),
+            ..Config::default()
+        },
+    );
+    let first = render_text(&app, 120, 32);
+    assert!(first.contains("BODY_ALPHA"));
+    assert!(!first.contains("BODY_BETA"));
+    let center = first
+        .lines()
+        .map(|line| line.chars().skip(26).take(60).collect::<String>())
+        .collect::<String>();
+    assert!(
+        !center.contains("note:"),
+        "internal links must not appear in task list"
+    );
+    app.cursor = 1;
+    for (cols, rows) in [(120, 32), (40, 30)] {
+        let text = render_text(&app, cols, rows);
+        assert!(text.contains("BODY_BETA"));
+        assert!(!text.contains("BODY_ALPHA"));
+    }
+    app.mode = Mode::Detail;
+    let detail = render_text(&app, 120, 32);
+    assert!(detail.contains("BODY_BETA"));
+    assert!(
+        !detail.contains("note:"),
+        "detail must display content, not internal links"
+    );
+    let modal_top = (31 - 27) / 2;
+    assert!(
+        detail
+            .lines()
+            .skip(modal_top)
+            .take(6)
+            .any(|line| line.contains("BODY_BETA")),
+        "body must be visible before metadata without scrolling"
+    );
+    app.mode = Mode::Insert;
+    app.body.focused = true;
+    app.draft_set_insert("正文滚动测试".into());
+    app.body.draft.set(
+        format!("{}中文尾部 BODY_TAIL", "第一行\n".repeat(50)),
+        tuxedo::app::DialogInputMode::Insert,
+    );
+    let text = render_text(&app, 40, 16);
+    assert!(text.contains("BODY_TAIL"), "{text}");
+    assert!(!text.contains("第一行"));
+    for (cols, rows) in [(0, 0), (1, 1), (20, 5)] {
+        render_text(&app, cols, rows);
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn insert_dialog() {
     let mut app = make_app();
     app.mode = Mode::Insert;

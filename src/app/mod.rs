@@ -13,6 +13,7 @@ use crate::theme::{self, Theme};
 use crate::todo::Task;
 
 mod autocomplete;
+mod body;
 mod bulk;
 mod chord;
 mod draft;
@@ -34,6 +35,7 @@ pub use crate::core::Archive;
 pub use crate::core::History;
 pub use crate::core::filter::{ListDueBucket, ordered_unique};
 pub use autocomplete::{ActiveToken, AutocompleteTarget, TokenKind, active_token};
+pub use body::BodyState;
 pub use chord::Chord;
 pub use draft::{DialogInputMode, DraftCursor, DraftState};
 pub use draft_overlay::{
@@ -103,6 +105,7 @@ pub struct App {
     /// Read via `filter()`; mutate via `set_search`/`set_project`/etc.
     pub(crate) filter: Filter,
     pub draft: DraftState,
+    pub body: BodyState,
     pub selection: Selection,
     flash_state: Flash,
     pub chord: Chord,
@@ -183,9 +186,10 @@ impl App {
         Self::from_store(store, file_path, cfg)
     }
 
-    fn from_store(store: Store, file_path: PathBuf, cfg: Config) -> Self {
+    fn from_store(mut store: Store, file_path: PathBuf, cfg: Config) -> Self {
         // Read saved filters before `cfg` is moved into `Prefs::from_config`.
         let note_dir = note::notes_dir_from_config(cfg.notes_dir.as_deref());
+        store.set_notes_dir(note_dir.clone());
         let saved_filters = cfg
             .filters
             .iter()
@@ -203,6 +207,7 @@ impl App {
             view_cursor: [0; 2],
             filter: Filter::default(),
             draft: DraftState::default(),
+            body: BodyState::default(),
             selection: Selection::default(),
             flash_state: Flash::default(),
             chord: Chord::default(),
@@ -240,6 +245,7 @@ impl App {
     pub fn open_file(&mut self, file_path: PathBuf, done_path: PathBuf, body: String) {
         let today = self.store.today().to_string();
         self.store = Store::new_with_done(file_path.clone(), done_path, body, today);
+        self.store.set_notes_dir(self.notes_dir.clone());
         self.file_path = file_path;
         self.cursor = 0;
         self.recompute_visible();

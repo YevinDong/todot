@@ -32,12 +32,16 @@ with tempfile.TemporaryDirectory(prefix='中文检查 ', dir=ROOT / '.local') as
     project = Path(temp) / '待办 项目'
     (project / '.local/bin').mkdir(parents=True)
     shutil.copy2(ROOT / 'start.sh', project / 'start.sh')
+    shutil.copy2(ROOT / 'migrate-data.sh', project / 'migrate-data.sh')
     launcher = project / 'start.sh'
+    home = Path(temp) / '用户目录'
+    data = home / '.todo-tui'
     editor = project / '编辑器.sh'
     editor.write_text("#!/bin/sh\nprintf 'EDITOR_SENTINEL\\n'\n")
     editor.chmod(0o755)
     env = dict(os.environ, TERM='xterm-256color', LANG='C.UTF-8',
-               VISUAL=str(editor), EDITOR=str(project / '不存在的编辑器'))
+               HOME=str(home), VISUAL=str(editor), EDITOR=str(project / '不存在的编辑器'))
+    env.pop('TODO_TUI_HOME', None)
     # 模拟环境中已有其他待办路径；启动脚本不能误写它们。
     env.update(TODO_FILE=str(Path(temp) / '外部.txt'), DONE_FILE=str(Path(temp) / '外部归档.txt'))
 
@@ -61,7 +65,10 @@ with tempfile.TemporaryDirectory(prefix='中文检查 ', dir=ROOT / '.local') as
     raw = '(A) 检查中文保存 +工作 @电脑 due:2099-12-31'
     run('add', raw)
     listing = json.loads(run('--json', 'list'))
-    assert '检查中文保存 +工作 @电脑 due:2099-12-31' in (project / 'todo.txt').read_text()
+    assert '检查中文保存 +工作 @电脑 due:2099-12-31' in (data / 'todo.txt').read_text()
+    assert not (project / 'todo.txt').exists()
+    assert not (project / '.config').exists()
+    assert data.stat().st_mode & 0o777 == 0o700
     assert '检查中文保存' in json.dumps(listing, ensure_ascii=False)
     assert not (Path(temp) / '外部.txt').exists()
     assert not (Path(temp) / '外部归档.txt').exists()
@@ -144,7 +151,28 @@ with tempfile.TemporaryDirectory(prefix='中文检查 ', dir=ROOT / '.local') as
         assert '\x1b[2J' in refreshed and '交互录入中文' in plain(refreshed), 'Ctrl+L 应重绘并保留未保存输入'
         refocused = screen(b'\x1b[O\x1b[I', raw=True)
         assert '\x1b[2J' in refocused and '交互录入中文' in plain(refocused), '恢复焦点不能丢失未保存输入'
-        assert '已添加' in screen(b'\r')
+        assert '输入中' in screen(b'\t'), 'Tab 应切换到正文框'
+        body_text = '# 正文首段\n\n  缩进 +不是项目 @不是场景 due:2099-01-01\n```rust\nlet value = 1;\n```\n正文末段 BODY_TAIL'
+        pasted = screen(b'\x1b[200~' + body_text.encode() + b'\x1b[201~')
+        assert 'BODY_TAIL' in pasted, '多行粘贴应显示正文尾部'
+        screen(b'\r')
+        body_text += '\n'
+        assert '交互录入中文' not in (data / 'todo.txt').read_text(), '正文 Enter 只能换行，不能保存'
+        assert '已添加' in screen(b'\x13'), 'Ctrl-S 应保存标题和正文'
+        saved_line = next(line for line in (data / 'todo.txt').read_text().splitlines() if '交互录入中文' in line)
+        note_rel = next(token[5:] for token in saved_line.split() if token.startswith('note:'))
+        assert (data / 'notes' / note_rel).read_text() == body_text, '正文必须逐字保存'
+        assert '+不是项目' not in saved_line and 'due:2099-01-01' not in saved_line
+        expanded_body = screen(b'\r')
+        assert '正文首段' in expanded_body and 'BODY_TAIL' in expanded_body, '详情应显示正文'
+        assert 'note:' not in expanded_body, '详情不能显示内部正文文件链接'
+        screen(b'\x1b')
+        screen(b'dd')
+        assert '交互录入中文' not in (data / 'todo.txt').read_text()
+        assert not (data / 'notes' / note_rel).exists(), '删除任务必须同时删除正文文件'
+        screen(b'u')
+        assert '交互录入中文' in (data / 'todo.txt').read_text()
+        assert (data / 'notes' / note_rel).read_text() == body_text, '撤销必须恢复正文'
         exited = screen(b'q', raw=True)
         assert '\x1b[?1004l' in exited, '退出时应关闭终端焦点通知'
         assert process.wait(timeout=5) == 0
@@ -154,11 +182,43 @@ with tempfile.TemporaryDirectory(prefix='中文检查 ', dir=ROOT / '.local') as
             process.wait(timeout=5)
         os.close(master)
 
-    assert '交互录入中文' in (project / 'todo.txt').read_text()
+    assert '交互录入中文' in (data / 'todo.txt').read_text()
     run('done', '1')
     run('archive')
-    assert '检查中文保存' in (project / 'done.txt').read_text()
-    assert '检查中文保存' not in (project / 'todo.txt').read_text()
-    assert '交互录入中文' in (project / 'todo.txt').read_text()
+    assert '检查中文保存' in (data / 'done.txt').read_text()
+    assert '检查中文保存' not in (data / 'todo.txt').read_text()
+    assert '交互录入中文' in (data / 'todo.txt').read_text()
+    assert (data / 'notes' / note_rel).read_text() == body_text, '完成或归档不能删除正文'
+    run('--force', 'del', '1')
+    assert not (data / 'notes' / note_rel).exists(), 'CLI 删除也必须清理正文'
 
-print('通过：路径隔离、中文交互/归档、窄屏布局/详情展开、焦点恢复/缩放/编辑器返回重绘、Ctrl+L 保留输入。')
+    # 首次启动自动复制旧项目数据；目标已存在时不得覆盖或重复导入。
+    legacy = Path(temp) / '旧项目'
+    (legacy / '.local/bin').mkdir(parents=True)
+    for name in ['start.sh', 'migrate-data.sh']:
+        shutil.copy2(ROOT / name, legacy / name)
+    shutil.copy2(BINARY, legacy / '.local/bin/tuxedo')
+    (legacy / 'notes').mkdir()
+    (legacy / '.config/tuxedo').mkdir(parents=True)
+    originals = {'todo.txt': '旧任务 note:旧正文.md\n', 'done.txt': 'x 已完成\n',
+                 'inbox.txt': '收件箱\n', 'notes/旧正文.md': '# 正文\n',
+                 '.config/tuxedo/config.toml': 'theme = Dawn\n'}
+    for name, content in originals.items():
+        (legacy / name).write_text(content)
+    migrated = Path(temp) / '迁移目录'
+    migration_env = dict(env, TODO_TUI_HOME=str(migrated))
+    result = subprocess.run([str(legacy / 'start.sh'), '--json', 'list'], env=migration_env,
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    for name, content in originals.items():
+        assert (legacy / name).read_text() == content
+        target = name.replace('.config/', 'config/')
+        assert (migrated / target).read_text() == content
+    (legacy / 'todo.txt').write_text('不会重复导入\n')
+    result = subprocess.run([str(legacy / 'migrate-data.sh')], env=migration_env,
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0 and '未覆盖' in result.stderr
+    assert (migrated / 'todo.txt').read_text() == originals['todo.txt']
+    assert not (legacy / 'notes/旧正文.md').is_symlink()
+
+print('通过：用户数据目录/安全迁移、中文交互/归档、正文编辑/多行粘贴/详情/删除联动、窄屏布局、焦点恢复/缩放/编辑器返回、Ctrl+L 保留输入。')

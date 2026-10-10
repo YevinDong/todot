@@ -17,7 +17,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // Wrap to the actual pane width minus 1-char left padding and 1-char
     // safety margin on the right. Floor at 16 so a tiny pane still wraps.
     let wrap_w = (area.width as usize).saturating_sub(2).max(16);
-    let lines = build_lines(theme, task, app.today(), wrap_w);
+    let lines = build_lines(theme, task, app.today(), wrap_w, app.task_body());
     let para = Paragraph::new(lines)
         .wrap(Wrap { trim: false })
         .style(Style::default().bg(theme.panel).fg(theme.fg));
@@ -95,16 +95,20 @@ pub fn render_compact(frame: &mut Frame, area: Rect, app: &App) {
         ),
     ]);
     frame.render_widget(Paragraph::new(labels).style(style), tags);
+    let content = match app.task_body() {
+        Ok(Some(text)) => crate::note::display_text(&text),
+        Ok(None) => task
+            .notes
+            .iter()
+            .map(|n| format!(" 备注 {n}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Err(e) => format!(" 正文读取失败：{e}"),
+    };
     frame.render_widget(
-        Paragraph::new(
-            task.notes
-                .iter()
-                .map(|n| format!(" 备注 {n}"))
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )
-        .wrap(Wrap { trim: false })
-        .style(style),
+        Paragraph::new(content)
+            .wrap(Wrap { trim: false })
+            .style(style),
         notes,
     );
 }
@@ -124,6 +128,7 @@ pub fn render_full(frame: &mut Frame, area: Rect, app: &App) {
         app.cur_task(),
         app.today(),
         usize::from(inner.width.saturating_sub(2)).max(1),
+        app.task_body(),
     ))
     .wrap(Wrap { trim: false })
     .style(Style::default().fg(theme.fg).bg(theme.panel));
@@ -142,6 +147,7 @@ fn build_lines<'a>(
     task: Option<&'a Task>,
     today: &'a str,
     wrap_w: usize,
+    body: std::io::Result<Option<String>>,
 ) -> Vec<Line<'a>> {
     let mut rows: Vec<Line> = Vec::new();
     rows.push(line_panel(
@@ -160,6 +166,36 @@ fn build_lines<'a>(
         return rows;
     };
 
+    match body {
+        Ok(Some(text)) => {
+            rows.push(line_panel(
+                theme,
+                vec![Span::styled(
+                    format!(" {}", crate::todo::body_only(&t.raw)),
+                    Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+                )],
+            ));
+            rows.push(line_panel(
+                theme,
+                vec![Span::styled(
+                    " 正文",
+                    Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+                )],
+            ));
+            for line in crate::note::display_text(&text).split('\n') {
+                rows.push(line_panel(theme, vec![Span::raw(format!(" {line}"))]));
+            }
+            rows.push(line_panel(theme, vec![Span::raw(" ")]));
+        }
+        Ok(None) => {}
+        Err(e) => rows.push(line_panel(
+            theme,
+            vec![Span::styled(
+                format!(" 正文读取失败：{e}"),
+                Style::default().fg(theme.overdue),
+            )],
+        )),
+    }
     let priority_value = if let Some(p) = t.priority {
         Span::styled(
             format!("({p})"),
@@ -234,7 +270,7 @@ fn build_lines<'a>(
             vec![Span::styled(" 备注", Style::default().fg(theme.dim))],
         ));
         for note in &t.notes {
-            let chunks = wrap_words(note, wrap_w.saturating_sub(4));
+            let chunks = wrap_words(note, wrap_w.saturating_sub(4), false);
             for (i, chunk) in chunks.into_iter().enumerate() {
                 let prefix = if i == 0 { "   - " } else { "     " };
                 rows.push(line_panel(
@@ -270,7 +306,7 @@ fn build_lines<'a>(
     ));
     rows.push(line_panel(theme, vec![Span::raw(" ")]));
     let mut state = RawWalk::default();
-    for chunk in wrap_words(&t.raw, wrap_w) {
+    for chunk in wrap_words(&t.raw, wrap_w, true) {
         let mut spans: Vec<Span> = vec![Span::raw(" ")];
         let mut words = chunk.into_iter();
         if let Some(first) = words.next() {
@@ -341,11 +377,13 @@ fn line_panel<'a>(theme: &Theme, spans: Vec<Span<'a>>) -> Line<'a> {
 /// Wrap `s` to roughly `width` graphemes, returning each output line as a
 /// vector of borrowed words. Borrowing avoids the per-frame `String` alloc
 /// that the previous `Vec<String>` form forced on every render.
-fn wrap_words(s: &str, width: usize) -> Vec<Vec<&str>> {
+fn wrap_words(s: &str, width: usize, hide_link: bool) -> Vec<Vec<&str>> {
     let mut out: Vec<Vec<&str>> = Vec::new();
     let mut acc: Vec<&str> = Vec::new();
     let mut acc_len = 0;
-    for word in s.split_whitespace() {
+    for word in crate::note::task_tokens(s)
+        .filter_map(|(word, linked)| (!hide_link || !linked).then_some(word))
+    {
         let wlen = Span::raw(word).width();
         let extra = if acc.is_empty() { 0 } else { 1 };
         if acc_len + wlen + extra > width && !acc.is_empty() {

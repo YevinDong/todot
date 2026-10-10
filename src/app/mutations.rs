@@ -162,6 +162,11 @@ impl App {
                 self.recompute_visible();
                 self.clamp_cursor();
             }
+            DeleteOutcome::CleanupFailed { error, .. } => {
+                self.flash(error.to_string());
+                self.recompute_visible();
+                self.clamp_cursor();
+            }
             DeleteOutcome::Aborted(r) => self.handle_reconcile_abort(r),
             DeleteOutcome::OutOfRange => {}
             DeleteOutcome::Error(e) => self.flash(format!("写入失败：{e}")),
@@ -178,27 +183,10 @@ impl App {
             return AddOutcome::Empty;
         }
 
-        // Natural-language pre-pass. If the buffer reads like prose and the
-        // parser extracted anything structured, rewrite the draft to canonical
-        // todo.txt and bail before saving — the user's *next* Enter saves the
-        // now-canonical form through the store.
-        if nl::looks_like_natural_language(&text)
-            && let Ok(today) = chrono::NaiveDate::parse_from_str(self.store.today(), "%Y-%m-%d")
-            && let Some(parsed) = nl::try_parse(&text, today)
-        {
-            let canonical = nl::format_as_todo_txt(&parsed);
-            if canonical != text {
-                let body_was_filled = !parsed.body.trim().is_empty();
-                self.draft_set(canonical);
-                if body_was_filled {
-                    self.flash("已解析日期，请按 Enter 保存");
-                } else {
-                    self.flash("已解析，请补充正文后按 Enter 保存");
-                }
-                return AddOutcome::Parsed;
-            }
+        if self.normalize_add_draft() {
+            return AddOutcome::Parsed;
         }
-
+        let text = self.draft.text().trim().to_string();
         match self.store.add_finalized(&text) {
             CoreAdd::Added { abs } => {
                 self.flash("已添加");
@@ -217,20 +205,48 @@ impl App {
         }
     }
 
-    pub fn save_edit(&mut self) {
+    pub(crate) fn normalize_add_draft(&mut self) -> bool {
+        let text = self.draft.text().trim().to_string();
+        if nl::looks_like_natural_language(&text)
+            && let Ok(today) = chrono::NaiveDate::parse_from_str(self.store.today(), "%Y-%m-%d")
+            && let Some(parsed) = nl::try_parse(&text, today)
+        {
+            let canonical = nl::format_as_todo_txt(&parsed);
+            if canonical != text {
+                let body_was_filled = !parsed.body.trim().is_empty();
+                self.draft_set(canonical);
+                if body_was_filled {
+                    self.flash("已解析日期，请按 Enter 保存");
+                } else {
+                    self.flash("已解析，请补充正文后按 Enter 保存");
+                }
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn save_edit(&mut self) -> AddOutcome {
         let Some(idx) = self.selection.editing() else {
-            return;
+            return AddOutcome::Invalid;
         };
         let text = self.draft.text().to_string();
         match self.store.edit_line(idx, &text) {
             EditOutcome::Saved { abs } => {
                 self.flash("已保存");
                 self.after_mutation(abs);
+                AddOutcome::Saved
             }
-            // Empty draft / vanished index: quiet no-op, as before.
-            EditOutcome::Empty | EditOutcome::OutOfRange | EditOutcome::TermNotFound => {}
-            EditOutcome::Aborted(r) => self.handle_reconcile_abort(r),
-            EditOutcome::Error(e) => self.flash(format!("无效输入：{e}")),
+            EditOutcome::Empty => AddOutcome::Empty,
+            EditOutcome::OutOfRange | EditOutcome::TermNotFound => AddOutcome::Invalid,
+            EditOutcome::Aborted(r) => {
+                self.handle_reconcile_abort(r);
+                AddOutcome::Invalid
+            }
+            EditOutcome::Error(e) => {
+                self.flash(format!("无效输入：{e}"));
+                AddOutcome::Invalid
+            }
         }
     }
 
@@ -425,6 +441,11 @@ impl App {
                 self.recompute_visible();
                 self.clamp_cursor();
             }
+            ArchiveDeleteOutcome::CleanupFailed(e) => {
+                self.flash(e.to_string());
+                self.recompute_visible();
+                self.clamp_cursor();
+            }
             ArchiveDeleteOutcome::OutOfRange => {}
             ArchiveDeleteOutcome::DoneReloaded => {
                 self.flash("done.txt 已被外部修改，已重新加载");
@@ -590,10 +611,7 @@ mod tests {
             app.draft.text(),
             "Pay rent +home @bank due:2026-06-01 rec:+1m t:-3d"
         );
-        assert_eq!(
-            app.flash_active(),
-            Some("已解析日期，请按 Enter 保存")
-        );
+        assert_eq!(app.flash_active(), Some("已解析日期，请按 Enter 保存"));
     }
 
     #[test]

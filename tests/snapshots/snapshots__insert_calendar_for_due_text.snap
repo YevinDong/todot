@@ -12,19 +12,18 @@ expression: buffer_to_text(&buf)
    +learning         1      4   (B) Renew passport before summer t                                  
    +personal         1      5   (B) Draft hiring rubric for senior 原 始 记 录                          
    +travel           1     (2)  优 先 级  C  ────────────────────────                                  
-                            6   (C) Pay quarterly estimated taxes  (A) 2026-05-01 Finish Q2 board   
- 场 景                        7   (C) Order new running shoes +healt deck +work @laptop               
-   @errands          4     (8)┌ 新 建 任 务  ────────────────────────────┐:2026-05-06                   
-   @home             4      8 │                                      │                              
-   @laptop           4      9 │  › fore summer trip +travel @errands█│                              
-   @phone            3     10 │  有 效  · 优 先 级  A · 1 +项 目  1 @场 景    │                              
-                           11 │                                      │                              
-                           12 │  格 式 ： (A) 买 牛 奶  +购 物  @家  due:2026-│                              
-                           13 │                                      │                              
-                           14 └───┌ 截 止 日 期  ──────────────────────────────────────┐                
-                           15     │  ‹  五 月  2026  ›                               │                
-                                  │   日   一   二   三   四   五   六                    │                
-                                  │                        1   2                   │                
+                            6 ┌ 新 建 任 务  ────────────────────────────┐ 2026-05-01 Finish Q2 board   
+ 场 景                        7 │  标 题 （ 任 务 属 性 在 此 解 析 ）             │k +work @laptop               
+   @errands          4     (8)│  › fore summer trip +travel @errands█│:2026-05-06                   
+   @home             4      8 │  有 效  · 优 先 级  A · 1 +项 目  1 @场 景    │                              
+   @laptop           4      9 │┌ 正 文  · Tab 编 辑  ───────────────────┐│                              
+   @phone            3     10 ││                                    ││                              
+                           11 ││                                    ││                              
+                           12 ││                                    ││                              
+                           13 ││  ┌ 截 止 日 期  ──────────────────────────────────────┐                
+                           14 │└──│  ‹  五 月  2026  ›                               │                
+                           15 │ En│   日   一   二   三   四   五   六                    │                
+                              └───│                        1   2                   │                
                                   │    3   4   5   6   7   8   9                   │                
                                   │   10  11  12  13  14  15  16                   │                
                                   │   17  18  19  20  21  22  23                   │                
@@ -33,4 +32,5 @@ expression: buffer_to_text(&buf)
                                   │                                                │                
                                   │  周 四  五 月 7日                                   │                
                                   │  t 今 天  · T 明 天  · w +1w · m +1mo · x 清 除      │                
- 输 入    Enter 保 存  · Esc 普 通 模 式  └────────────────────────────────────────────────┘tuxedo 2026.8.1
+                                  └────────────────────────────────────────────────┘                
+ 输 入    Enter 保 存  · Tab 正 文  · Ctrl-S 保 存  · Esc 普 通 模 式  15 项 待 办  · 2026-05-06 · tuxedo 2026.8.1

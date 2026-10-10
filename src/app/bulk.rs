@@ -47,6 +47,13 @@ impl App {
                 self.recompute_visible();
                 self.clamp_cursor();
             }
+            BulkDeleteOutcome::CleanupFailed { error, .. } => {
+                self.selection.clear();
+                self.mode = Mode::Normal;
+                self.flash(error.to_string());
+                self.recompute_visible();
+                self.clamp_cursor();
+            }
             BulkDeleteOutcome::Nothing => {
                 self.selection.clear();
                 self.mode = Mode::Normal;

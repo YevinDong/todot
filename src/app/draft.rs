@@ -114,6 +114,13 @@ impl DraftState {
         self.reset_autocomplete();
     }
 
+    pub fn insert_text(&mut self, text: &str) {
+        let pos = self.cursor.byte();
+        self.text.insert_str(pos, text);
+        self.cursor = DraftCursor(pos + text.len());
+        self.reset_autocomplete();
+    }
+
     pub fn backspace(&mut self) {
         let pos = self.cursor.byte();
         if pos == 0 {
@@ -157,6 +164,58 @@ impl DraftState {
 
     pub fn move_end(&mut self) {
         self.cursor = DraftCursor::at_end(&self.text);
+    }
+
+    pub fn move_line_home(&mut self) {
+        self.cursor = DraftCursor(
+            self.text[..self.cursor.byte()]
+                .rfind('\n')
+                .map_or(0, |i| i + 1),
+        );
+    }
+
+    pub fn move_line_end(&mut self) {
+        let cursor = self.cursor.byte();
+        self.cursor = DraftCursor(
+            cursor
+                + self.text[cursor..]
+                    .find('\n')
+                    .unwrap_or(self.text.len() - cursor),
+        );
+    }
+
+    pub fn move_vertical(&mut self, down: bool) {
+        use ratatui::style::Style;
+        use ratatui::text::Span;
+        let cursor = self.cursor.byte();
+        let start = self.text[..cursor].rfind('\n').map_or(0, |i| i + 1);
+        let column = Span::raw(&self.text[start..cursor]).width();
+        let target = if down {
+            match self.text[cursor..].find('\n') {
+                Some(i) => cursor + i + 1,
+                None => return,
+            }
+        } else {
+            if start == 0 {
+                return;
+            }
+            self.text[..start - 1].rfind('\n').map_or(0, |i| i + 1)
+        };
+        let end = target
+            + self.text[target..]
+                .find('\n')
+                .unwrap_or(self.text.len() - target);
+        let span = Span::raw(&self.text[target..end]);
+        let mut byte = target;
+        let mut width = 0;
+        for grapheme in span.styled_graphemes(Style::default()) {
+            width += Span::raw(grapheme.symbol).width();
+            if width > column {
+                break;
+            }
+            byte += grapheme.symbol.len();
+        }
+        self.cursor = DraftCursor(byte);
     }
 
     /// Move to the start of the next word (`w`).
@@ -315,6 +374,7 @@ impl DraftState {
 impl App {
     pub fn draft_clear(&mut self) {
         self.draft.clear();
+        self.body = super::BodyState::default();
     }
 
     /// Seed the edit dialog and open it in Normal mode (`e`), so vim users can

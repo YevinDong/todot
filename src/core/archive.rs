@@ -274,13 +274,12 @@ impl Store {
             .filter(|(i, _)| *i != archive_idx)
             .map(|(_, t)| t.clone())
             .collect();
-        let archive_body = todo::serialize(&new_archive);
-        if let Err(e) = todo::write_atomic(&self.archive.path, &archive_body) {
-            return ArchiveDeleteOutcome::Error(StoreError::ArchiveIo(e));
+        let removed = self.archive.tasks[archive_idx].clone();
+        match self.commit_deletion(new_archive, &[removed], true) {
+            Ok(None) => ArchiveDeleteOutcome::Deleted,
+            Ok(Some(error)) => ArchiveDeleteOutcome::CleanupFailed(error),
+            Err(e) => ArchiveDeleteOutcome::Error(e),
         }
-        self.archive.tasks = new_archive;
-        self.archive.last_disk = archive_body;
-        ArchiveDeleteOutcome::Deleted
     }
 
     pub(crate) fn persist(&mut self) -> Result<(), StoreError> {

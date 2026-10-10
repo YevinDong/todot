@@ -39,9 +39,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     let hint = match app.mode {
+        Mode::Insert if app.body.focused => {
+            "正文 Enter 换行 · Tab 标题 · Ctrl-S 保存 · Esc 普通模式"
+        }
         Mode::Insert => match app.draft.input_mode() {
-            DialogInputMode::Normal => "h/l 移动 · w/b/e 跳词 · i/a 输入 · Enter 保存 · Esc 取消",
-            DialogInputMode::Insert => "Enter 保存 · Esc 普通模式",
+            DialogInputMode::Normal => "h/l 移动 · i/a 输入 · Tab 正文 · Ctrl-S 保存 · Esc 取消",
+            DialogInputMode::Insert => "Enter 保存 · Tab 正文 · Ctrl-S 保存 · Esc 普通模式",
         },
         Mode::Visual => "空格 选择 · x 完成 · dd 删除 · Esc 取消",
         Mode::Help => "? 关闭帮助",
@@ -63,6 +66,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let hint = match app.mode {
             Mode::Detail => "j/k滚动 Esc返回",
             Mode::PickProject | Mode::PickContext | Mode::PickSavedFilter => "j/k选择 Enter确认",
+            Mode::Insert if app.body.focused => "Enter换行 Tab标题 Ctrl-S保存",
             Mode::Insert => match app.draft.input_mode() {
                 DialogInputMode::Insert => "Enter保存 Esc普通",
                 DialogInputMode::Normal => "Enter保存 Esc取消",

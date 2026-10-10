@@ -117,7 +117,11 @@ fn main() -> Result<()> {
     let title = ui::title::terminal_title(&path, home.as_deref(), ui::title::DEFAULT_BUDGET);
     let _ = crossterm::execute!(io::stdout(), crossterm::terminal::SetTitle(title));
     let result = run(terminal, &mut app_state, &keybinds, config_rx);
-    let _ = crossterm::execute!(io::stdout(), event::DisableFocusChange);
+    let _ = crossterm::execute!(
+        io::stdout(),
+        event::DisableFocusChange,
+        event::DisableBracketedPaste
+    );
     ratatui::restore();
     // Clear the title on exit so the shell retitles on its next prompt rather
     // than leaving `tuxedo …` behind.
@@ -182,7 +186,11 @@ fn run(
     keybinds: &KeyBindings,
     config_rx: Option<mpsc::Receiver<()>>,
 ) -> Result<()> {
-    crossterm::execute!(io::stdout(), event::EnableFocusChange)?;
+    crossterm::execute!(
+        io::stdout(),
+        event::EnableFocusChange,
+        event::EnableBracketedPaste
+    )?;
     let mut dirty = true;
     while !app.should_quit {
         // Pick up midnight rollover so threshold-hidden tasks reveal
@@ -239,9 +247,15 @@ fn run(
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     handle_key(app, key, keybinds);
                     if let Some(path) = app.take_pending_editor_path() {
-                        open_path_in_editor(&path)?;
+                        if let Err(e) = open_path_in_editor(&path) {
+                            app.flash(format!("{e:#}"));
+                        }
                         terminal.clear()?;
                     }
+                    dirty = true;
+                }
+                Event::Paste(text) => {
+                    handle_paste(app, &text);
                     dirty = true;
                 }
                 // 终端恢复后，即便尺寸相同，旧差量缓存也可能不再对应实际画面。
@@ -305,25 +319,45 @@ fn poll_config_reload(app: &mut App, rx: &Option<mpsc::Receiver<()>>) -> bool {
 }
 
 fn open_path_in_editor(path: &std::path::Path) -> Result<()> {
-    let editor = std::env::var("VISUAL")
-        .or_else(|_| std::env::var("EDITOR"))
-        .unwrap_or_else(|_| "nvim".to_string());
-    crossterm::execute!(io::stdout(), event::DisableFocusChange)?;
+    let editors = std::env::var_os("VISUAL")
+        .into_iter()
+        .chain(std::env::var_os("EDITOR"))
+        .chain(["nvim", "vim", "vi"].map(std::ffi::OsString::from))
+        .filter(|editor| !editor.is_empty());
+    crossterm::execute!(
+        io::stdout(),
+        event::DisableFocusChange,
+        event::DisableBracketedPaste
+    )?;
     ratatui::restore();
-    let status = std::process::Command::new(&editor)
-        .arg(path)
-        .status()
-        .with_context(|| format!("无法启动编辑器 `{editor}`"));
+    let result = run_editor(path, editors);
     ratatui::crossterm::terminal::enable_raw_mode()?;
     ratatui::crossterm::execute!(
         io::stdout(),
         ratatui::crossterm::terminal::EnterAlternateScreen,
-        event::EnableFocusChange
+        event::EnableFocusChange,
+        event::EnableBracketedPaste
     )?;
-    match status {
-        Ok(_) => Ok(()),
-        Err(e) => Err(e),
+    result
+}
+
+fn run_editor(
+    path: &std::path::Path,
+    editors: impl IntoIterator<Item = impl AsRef<std::ffi::OsStr>>,
+) -> Result<()> {
+    for editor in editors {
+        let editor = editor.as_ref();
+        match std::process::Command::new(editor).arg(path).status() {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                return Err(e)
+                    .with_context(|| format!("无法启动编辑器 `{}`", editor.to_string_lossy()));
+            }
+            Ok(status) if status.success() => return Ok(()),
+            Ok(status) => anyhow::bail!("编辑器 `{}` 退出失败：{status}", editor.to_string_lossy()),
+        }
     }
+    anyhow::bail!("找不到可用编辑器，请安装 nvim、vim 或 vi，或设置 VISUAL / EDITOR")
 }
 
 fn next_timeout(app: &App) -> Duration {
@@ -462,60 +496,36 @@ enum EditAction {
 
 impl EditAction {
     fn apply(self, app: &mut App) -> DraftEffect {
+        self.apply_draft(&mut app.draft)
+    }
+
+    fn apply_draft(self, draft: &mut tuxedo::app::DraftState) -> DraftEffect {
+        let effect = match self {
+            Self::Insert(_)
+            | Self::DeleteBackward
+            | Self::DeleteForward
+            | Self::DeleteWordBackward
+            | Self::DeleteWordForward
+            | Self::KillToStart
+            | Self::KillToEnd => DraftEffect::TextChanged,
+            _ => DraftEffect::CursorMoved,
+        };
         match self {
-            EditAction::Insert(c) => {
-                app.draft_insert_char(c);
-                DraftEffect::TextChanged
-            }
-            EditAction::DeleteBackward => {
-                app.draft_backspace();
-                DraftEffect::TextChanged
-            }
-            EditAction::DeleteForward => {
-                app.draft_delete_forward();
-                DraftEffect::TextChanged
-            }
-            EditAction::DeleteWordBackward => {
-                app.draft_delete_word_backward();
-                DraftEffect::TextChanged
-            }
-            EditAction::DeleteWordForward => {
-                app.draft_delete_word_forward();
-                DraftEffect::TextChanged
-            }
-            EditAction::KillToStart => {
-                app.draft_kill_to_start();
-                DraftEffect::TextChanged
-            }
-            EditAction::KillToEnd => {
-                app.draft_kill_to_end();
-                DraftEffect::TextChanged
-            }
-            EditAction::MoveLeft => {
-                app.draft_left();
-                DraftEffect::CursorMoved
-            }
-            EditAction::MoveRight => {
-                app.draft_right();
-                DraftEffect::CursorMoved
-            }
-            EditAction::MoveHome => {
-                app.draft_home();
-                DraftEffect::CursorMoved
-            }
-            EditAction::MoveEnd => {
-                app.draft_end();
-                DraftEffect::CursorMoved
-            }
-            EditAction::MoveWordForward => {
-                app.draft_word_forward();
-                DraftEffect::CursorMoved
-            }
-            EditAction::MoveWordBackward => {
-                app.draft_word_backward();
-                DraftEffect::CursorMoved
-            }
+            Self::Insert(c) => draft.insert_char(c),
+            Self::DeleteBackward => draft.backspace(),
+            Self::DeleteForward => draft.delete_forward(),
+            Self::DeleteWordBackward => draft.delete_word_backward(),
+            Self::DeleteWordForward => draft.delete_word_forward(),
+            Self::KillToStart => draft.kill_to_start(),
+            Self::KillToEnd => draft.kill_to_end(),
+            Self::MoveLeft => draft.move_left(),
+            Self::MoveRight => draft.move_right(),
+            Self::MoveHome => draft.move_home(),
+            Self::MoveEnd => draft.move_end(),
+            Self::MoveWordForward => draft.move_word_forward(),
+            Self::MoveWordBackward => draft.move_word_backward(),
         }
+        effect
     }
 }
 
@@ -587,17 +597,7 @@ fn apply_to_draft(app: &mut App, key: KeyEvent) -> DraftEffect {
 fn handle_insert_normal(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Enter => {
-            let outcome = if app.selection.editing().is_some() {
-                app.save_edit();
-                AddOutcome::Saved
-            } else {
-                app.add_from_draft()
-            };
-            if !matches!(outcome, AddOutcome::Parsed) {
-                app.mode = Mode::Normal;
-                app.draft_clear();
-                app.selection.exit_edit();
-            }
+            submit_task_draft(app);
         }
         KeyCode::Esc => {
             app.mode = Mode::Normal;
@@ -630,7 +630,91 @@ fn handle_insert_normal(app: &mut App, key: KeyEvent) {
     }
 }
 
+fn submit_task_draft(app: &mut App) {
+    if app.draft.overlay().is_some() {
+        app.flash("请先确认或关闭属性选择器");
+        return;
+    }
+    if matches!(
+        app.submit_task_draft(),
+        AddOutcome::Saved | AddOutcome::Empty
+    ) {
+        app.mode = Mode::Normal;
+        app.draft_clear();
+        app.selection.exit_edit();
+    }
+}
+
+fn handle_body_input(app: &mut App, key: KeyEvent) {
+    let ctrl = key.modifiers == KeyModifiers::CONTROL;
+    match key.code {
+        KeyCode::Tab | KeyCode::BackTab | KeyCode::F(6) => app.body.focused = false,
+        KeyCode::Esc => {
+            app.body.focused = false;
+            app.draft.set_input_mode(DialogInputMode::Normal);
+        }
+        KeyCode::Enter => app.body.draft.insert_char('\n'),
+        KeyCode::Up => app.body.draft.move_vertical(false),
+        KeyCode::Down => app.body.draft.move_vertical(true),
+        KeyCode::Char('p') if ctrl => app.body.draft.move_vertical(false),
+        KeyCode::Char('n') if ctrl => app.body.draft.move_vertical(true),
+        KeyCode::Home => app.body.draft.move_line_home(),
+        KeyCode::End => app.body.draft.move_line_end(),
+        KeyCode::Char('a') if ctrl => app.body.draft.move_line_home(),
+        KeyCode::Char('e') if ctrl => app.body.draft.move_line_end(),
+        // Single-line kill shortcuts must not unexpectedly delete half a document.
+        KeyCode::Char('u' | 'k') if ctrl => app.flash("正文请使用 Backspace / Delete 删除"),
+        _ => {
+            if let Some(action) = resolve_edit_key(key) {
+                action.apply_draft(&mut app.body.draft);
+            }
+        }
+    }
+}
+
+fn handle_paste(app: &mut App, text: &str) {
+    if app.mode == Mode::Insert && app.body.focused {
+        app.body.draft.insert_text(text);
+    } else if matches!(
+        app.mode,
+        Mode::Insert
+            | Mode::Search
+            | Mode::PromptProject
+            | Mode::PromptContext
+            | Mode::CommandPalette
+            | Mode::PromptSaveFilter
+            | Mode::PromptRenameProject
+            | Mode::PromptRenameContext
+    ) {
+        if text.contains(['\r', '\n']) {
+            app.flash("多行内容请切换到正文框粘贴");
+        } else if app.draft.overlay().is_none() {
+            app.draft.insert_text(text);
+        }
+    }
+}
+
 fn handle_insert(app: &mut App, key: KeyEvent, keybinds: &KeyBindings) {
+    if key.code == KeyCode::Char('s') && key.modifiers == KeyModifiers::CONTROL {
+        submit_task_draft(app);
+        return;
+    }
+    if app.body.focused {
+        handle_body_input(app, key);
+        return;
+    }
+    let switch = key.code == KeyCode::BackTab
+        || key.code == KeyCode::F(6)
+        || (key.code == KeyCode::Tab
+            && app.draft.overlay().is_none()
+            && !app.autocomplete_visible());
+    if switch {
+        app.draft.set_overlay(None);
+        app.draft.suppress_autocomplete();
+        app.body.focused = true;
+        app.draft.set_input_mode(DialogInputMode::Insert);
+        return;
+    }
     if app.draft.input_mode() == DialogInputMode::Normal {
         handle_insert_normal(app, key);
         return;
@@ -694,20 +778,7 @@ fn handle_insert(app: &mut App, key: KeyEvent, keybinds: &KeyBindings) {
             app.draft.set_input_mode(DialogInputMode::Normal);
         }
         KeyCode::Enter => {
-            let outcome = if app.selection.editing().is_some() {
-                app.save_edit();
-                AddOutcome::Saved
-            } else {
-                app.add_from_draft()
-            };
-            // `Parsed` means the NL parser rewrote the draft into canonical
-            // todo.txt and is asking the user to confirm — stay in Insert so
-            // they can review/edit before a second Enter saves.
-            if !matches!(outcome, AddOutcome::Parsed) {
-                app.mode = Mode::Normal;
-                app.draft_clear();
-                app.selection.exit_edit();
-            }
+            submit_task_draft(app);
         }
         _ => {
             let before = app.draft.text().len();
@@ -1205,26 +1276,15 @@ fn apply_action(app: &mut App, action: Action) {
             // view the moment it saves. The cursor parks after the seed, so
             // an unwanted tag is a backspace away.
             let seed = app.filter().tag_seed();
+            app.draft_clear();
             app.draft_set_insert(seed);
             app.selection.exit_edit();
         }
         Action::BeginEdit => {
-            if let Some(abs) = app.cur_abs()
-                && let Some(raw) = app.task_raw(abs)
-            {
-                app.selection.enter_edit(abs);
-                app.draft_set(raw);
-                app.mode = Mode::Insert;
-            }
+            app.begin_task_edit(false);
         }
         Action::BeginEditInsert => {
-            if let Some(abs) = app.cur_abs()
-                && let Some(raw) = app.task_raw(abs)
-            {
-                app.selection.enter_edit(abs);
-                app.draft_set_insert(raw);
-                app.mode = Mode::Insert;
-            }
+            app.begin_task_edit(true);
         }
         Action::ToggleComplete => {
             if app.mode == Mode::Visual && !app.selection.is_empty() {
@@ -1387,12 +1447,7 @@ fn apply_action(app: &mut App, action: Action) {
         // If there is no due date, the cursor begins on today
         // Enter/escape takes the user back to insert mode on the task
         Action::Reschedule => {
-            if let Some(abs) = app.cur_abs()
-                && let Some(raw) = app.task_raw(abs)
-            {
-                app.selection.enter_edit(abs);
-                app.draft_set_insert(raw);
-                app.mode = Mode::Insert;
+            if app.begin_task_edit(true) {
                 app.open_calendar(CalendarTarget::Due);
             }
         }
@@ -1457,6 +1512,97 @@ mod tests {
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use tuxedo::app::Sort;
     use tuxedo::config::Config;
+
+    #[test]
+    fn body_input_paste_and_failed_save_keep_draft_open() {
+        let dir = std::env::temp_dir().join(format!("tuxedo-body-input-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("test directory");
+        let path = dir.join("todo.txt");
+        std::fs::write(&path, "").expect("todo file");
+        let mut app = App::new(
+            path.clone(),
+            "".into(),
+            "2026-10-10".into(),
+            Config {
+                notes_dir: Some(dir.join("notes").to_string_lossy().into_owned()),
+                ..Config::default()
+            },
+        );
+        let bindings = KeyBindings::default();
+        apply_action(&mut app, Action::BeginAdd);
+        handle_paste(&mut app, "标题 +work");
+        handle_paste(&mut app, "不能放标题\n多行正文");
+        assert_eq!(app.draft.text(), "标题 +work");
+        handle_insert(
+            &mut app,
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            &bindings,
+        );
+        assert!(app.body.focused);
+        let text = "# 正文\n\n  +不是标签 @不是场景 due:2099-01-01\n正文结束";
+        handle_paste(&mut app, text);
+        handle_insert(
+            &mut app,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            &bindings,
+        );
+        assert!(app.tasks().is_empty());
+        assert_eq!(app.body.draft.text(), format!("{text}\n"));
+        handle_insert(
+            &mut app,
+            KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+            &bindings,
+        );
+        handle_insert(
+            &mut app,
+            KeyEvent::new(KeyCode::Home, KeyModifiers::NONE),
+            &bindings,
+        );
+        assert!(app.body.draft.text()[app.body.draft.cursor()..].starts_with("正文结束"));
+        handle_insert(
+            &mut app,
+            KeyEvent::new(KeyCode::End, KeyModifiers::NONE),
+            &bindings,
+        );
+        assert!(app.body.draft.text()[app.body.draft.cursor()..].starts_with('\n'));
+        std::fs::create_dir(path.with_extension("tmp")).expect("block task save");
+        handle_insert(&mut app, ctrl('s'), &bindings);
+        assert_eq!(app.mode, Mode::Insert);
+        assert_eq!(app.draft.text(), "标题 +work");
+        assert_eq!(app.body.draft.text(), format!("{text}\n"));
+        assert!(app.tasks().is_empty());
+        std::fs::remove_dir(path.with_extension("tmp")).expect("unblock task save");
+        handle_insert(&mut app, ctrl('s'), &bindings);
+        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.tasks().len(), 1);
+        assert!(app.tasks()[0].due.is_none());
+        assert_eq!(app.tasks()[0].projects, ["work"]);
+        assert_eq!(
+            app.task_body().expect("read body"),
+            Some(format!("{text}\n"))
+        );
+        assert!(app.begin_task_edit(true));
+        app.body.draft.insert_text("未保存输入");
+        let disk = std::fs::read_to_string(&path).expect("read task");
+        std::fs::write(&path, format!("{disk}外部新增任务\n")).expect("external change");
+        assert!(!app.check_external_changes());
+        handle_insert(&mut app, ctrl('s'), &bindings);
+        assert_eq!(app.mode, Mode::Insert);
+        assert!(app.body.draft.text().ends_with("未保存输入"));
+        assert_eq!(app.tasks().len(), 2);
+        std::fs::remove_dir_all(dir).expect("clean up");
+    }
+
+    #[test]
+    fn editor_falls_back_only_when_executable_is_missing() {
+        let file = std::path::Path::new("笔记 路径.md");
+        let missing = "/nonexistent/tuxedo-editor";
+        assert!(run_editor(file, [missing, "/bin/true", "/bin/false"]).is_ok());
+        assert!(run_editor(file, [missing, missing]).is_err());
+        assert!(run_editor(file, ["/bin/false", "/bin/true"]).is_err());
+        assert!(run_editor(file, ["/", "/bin/true"]).is_err());
+    }
 
     fn key(c: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)

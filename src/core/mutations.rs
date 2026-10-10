@@ -143,10 +143,11 @@ impl Store {
         if abs >= self.tasks.len() {
             return DeleteOutcome::OutOfRange;
         }
-        self.push_history();
-        self.tasks.remove(abs);
-        match self.persist() {
-            Ok(()) => DeleteOutcome::Deleted { abs },
+        let mut remaining = self.tasks.clone();
+        let removed = remaining.remove(abs);
+        match self.commit_deletion(remaining, &[removed], false) {
+            Ok(None) => DeleteOutcome::Deleted { abs },
+            Ok(Some(error)) => DeleteOutcome::CleanupFailed { abs, error },
             Err(e) => DeleteOutcome::Error(e),
         }
     }
@@ -190,7 +191,11 @@ impl Store {
                     Ok(()) => AddOutcome::Added {
                         abs: self.tasks.len() - 1,
                     },
-                    Err(e) => AddOutcome::Error(e),
+                    Err(e) => {
+                        self.tasks.pop();
+                        self.history.pop();
+                        AddOutcome::Error(e)
+                    }
                 }
             }
             Err(e) => AddOutcome::Error(StoreError::Parse(e)),
@@ -287,10 +292,14 @@ impl Store {
         match todo::parse_line(new_raw) {
             Ok(task) => {
                 self.push_history();
-                self.tasks[abs] = task;
+                let previous = std::mem::replace(&mut self.tasks[abs], task);
                 match self.persist() {
                     Ok(()) => EditOutcome::Saved { abs },
-                    Err(e) => EditOutcome::Error(e),
+                    Err(e) => {
+                        self.tasks[abs] = previous;
+                        self.history.pop();
+                        EditOutcome::Error(e)
+                    }
                 }
             }
             Err(e) => EditOutcome::Error(StoreError::Parse(e)),
@@ -503,13 +512,16 @@ impl Store {
             return BulkDeleteOutcome::Nothing;
         }
         indices.sort_by(|a, b| b.cmp(a));
-        self.push_history();
+        indices.dedup();
         let deleted = indices.len();
-        for abs in indices {
-            self.tasks.remove(abs);
-        }
-        match self.persist() {
-            Ok(()) => BulkDeleteOutcome::Done { deleted },
+        let mut remaining = self.tasks.clone();
+        let removed = indices
+            .into_iter()
+            .map(|abs| remaining.remove(abs))
+            .collect::<Vec<_>>();
+        match self.commit_deletion(remaining, &removed, false) {
+            Ok(None) => BulkDeleteOutcome::Done { deleted },
+            Ok(Some(error)) => BulkDeleteOutcome::CleanupFailed { deleted, error },
             Err(e) => BulkDeleteOutcome::Error(e),
         }
     }

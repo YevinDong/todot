@@ -93,6 +93,8 @@ pub fn run(argv: &[String]) -> Result<Option<i32>> {
     };
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let mut store = Store::open_sync_with_done(path, done, body, today);
+    let cfg = crate::config::Config::load();
+    store.set_notes_dir(crate::note::notes_dir_from_config(cfg.notes_dir.as_deref()));
 
     let json = args.json;
     let force = args.force;
@@ -441,9 +443,7 @@ fn cmd_del(store: &mut Store, pos: &[String], json: bool, force: bool) -> i32 {
                 }
                 0
             }
-            EditOutcome::TermNotFound => {
-                err(format!("任务 {} 中没有找到“{term}”", abs + 1))
-            }
+            EditOutcome::TermNotFound => err(format!("任务 {} 中没有找到“{term}”", abs + 1)),
             EditOutcome::OutOfRange => err(format!("任务 {} 不存在", abs + 1)),
             EditOutcome::Empty => usage("del N TERM"),
             EditOutcome::Aborted(_) => err("文件被外部修改，未保存更改"),
@@ -473,6 +473,10 @@ fn cmd_del(store: &mut Store, pos: &[String], json: bool, force: bool) -> i32 {
         }
         match store.delete(abs) {
             DeleteOutcome::Deleted { .. } => removed.push((abs + 1, task)),
+            DeleteOutcome::CleanupFailed { error, .. } => {
+                removed.push((abs + 1, task));
+                code = store_error(json, "del", error);
+            }
             DeleteOutcome::OutOfRange => code = err(format!("任务 {} 不存在", abs + 1)),
             DeleteOutcome::Aborted(_) => code = err("文件被外部修改，未删除任务"),
             DeleteOutcome::Error(e) => code = store_error(json, "del", e),
