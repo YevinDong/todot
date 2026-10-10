@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 use crate::app::App;
 use crate::theme::Theme;
@@ -111,23 +111,30 @@ pub fn render_compact(frame: &mut Frame, area: Rect, app: &App) {
 
 pub fn render_full(frame: &mut Frame, area: Rect, app: &App) {
     let theme = app.theme();
-    super::fill_bg(frame, area, Style::default().bg(theme.panel));
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.border))
+        .title(" 详情 · Esc 返回 ")
+        .style(Style::default().fg(theme.fg).bg(theme.panel));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
     let para = Paragraph::new(build_lines(
         theme,
         app.cur_task(),
         app.today(),
-        usize::from(area.width.saturating_sub(2)).max(1),
+        usize::from(inner.width.saturating_sub(2)).max(1),
     ))
     .wrap(Wrap { trim: false })
     .style(Style::default().fg(theme.fg).bg(theme.panel));
     let max_scroll = para
-        .line_count(area.width)
-        .saturating_sub(usize::from(area.height))
+        .line_count(inner.width)
+        .saturating_sub(usize::from(inner.height))
         .min(usize::from(u16::MAX)) as u16;
     let scroll = app.detail_scroll.get().min(max_scroll);
     app.detail_scroll.set(scroll);
-    app.detail_page_height.set(area.height);
-    frame.render_widget(para.scroll((scroll, 0)), area);
+    app.detail_page_height.set(inner.height);
+    frame.render_widget(para.scroll((scroll, 0)), inner);
 }
 
 fn build_lines<'a>(

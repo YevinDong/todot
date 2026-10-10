@@ -386,6 +386,46 @@ fn mobile_empty_filters_do_not_reserve_rows_and_status_stays_short() {
 }
 
 #[test]
+fn detail_popup_is_centered_opaque_and_keeps_background_outside() {
+    let mut app = make_app();
+    for (cols, rows) in [(100, 32), (160, 50), (40, 16)] {
+        let mut terminal = Terminal::new(TestBackend::new(cols, rows)).unwrap();
+        app.mode = Mode::Normal;
+        let background = terminal.draw(|f| ui::draw(f, &app)).unwrap().buffer.clone();
+        app.mode = Mode::Detail;
+        app.detail_scroll.set(0);
+        let actual = terminal.draw(|f| ui::draw(f, &app)).unwrap().buffer;
+        let w = (cols - 4).min(100);
+        let h = (rows - 5).min(32);
+        let x = (cols - w) / 2;
+        let y = (rows - 1 - h) / 2;
+        let popup = ratatui::layout::Rect::new(x, y, w, h);
+        assert_eq!(actual[(x, y)].symbol(), "┌");
+        assert_eq!(actual[(x + w - 1, y + h - 1)].symbol(), "┘");
+        assert_eq!(app.detail_page_height.get(), h - 2);
+        assert_eq!(actual[(x + w - 1, y + h - 1)].bg, app.theme().panel);
+
+        let mut isolated = Terminal::new(TestBackend::new(cols, rows)).unwrap();
+        let expected = isolated
+            .draw(|f| ui::detail::render_full(f, popup, &app))
+            .unwrap()
+            .buffer;
+        for row in 0..rows - 1 {
+            for col in 0..cols {
+                if popup.contains((col, row).into()) {
+                    assert_eq!(actual[(col, row)], expected[(col, row)]);
+                } else {
+                    assert_eq!(actual[(col, row)], background[(col, row)]);
+                }
+            }
+        }
+    }
+    for (cols, rows) in [(0, 0), (1, 1), (4, 4), (20, 5)] {
+        render_text(&app, cols, rows); // Tiny viewports must not panic.
+    }
+}
+
+#[test]
 fn full_detail_scroll_clamps_and_reaches_raw_record_after_resize() {
     let notes = (0..60)
         .map(|i| format!(" note:\"note-{i:02} 中文备注 long content\""))
@@ -407,9 +447,9 @@ fn full_detail_scroll_clamps_and_reaches_raw_record_after_resize() {
     assert!(last.contains("note-59"));
     let offset = app.detail_scroll.get();
     assert!(offset > 10 && offset < u16::MAX);
-    assert_eq!(app.detail_page_height.get(), 15);
+    assert_eq!(app.detail_page_height.get(), 9);
     let wider = render_text(&app, 100, 32);
-    assert_eq!(app.detail_page_height.get(), 31);
+    assert_eq!(app.detail_page_height.get(), 25);
     assert!(wider.contains("note-59"));
     assert!(app.detail_scroll.get() < offset);
     app.detail_scroll.set(0);

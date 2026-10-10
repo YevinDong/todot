@@ -140,7 +140,14 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     // Overlays
     match app.mode {
-        Mode::Detail => detail::render_full(frame, body_area, app),
+        Mode::Detail => {
+            let r = centered_in(
+                body_area,
+                body_area.width.saturating_sub(4).min(100),
+                body_area.height.saturating_sub(4).min(32),
+            );
+            detail::render_full(frame, r, app);
+        }
         Mode::Insert => {
             let dlg_w: u16 = (u32::from(center_area.width) * 4 / 5)
                 .clamp(u32::from(DIALOG_MIN_W), u32::from(DIALOG_MAX_W))
